@@ -1,0 +1,12 @@
+{
+  "/api/addChance/route": "/api/addChance",
+  "/api/addChances/route": "/api/addChances",
+  "/api/getLeaderboard/route": "/api/getLeaderboard",
+  "/api/initUser/route": "/api/initUser",
+  "/api/getUser/route": "/api/getUser",
+  "/api/saveScore/route": "/api/saveScore",
+  "/api/updateUsername/route": "/api/updateUsername",
+  "/api/useChance/route": "/api/useChance",
+  "/_not-found/page": "/_not-found",
+  "/page": "/"
+}

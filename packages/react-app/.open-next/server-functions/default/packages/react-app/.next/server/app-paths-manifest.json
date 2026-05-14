@@ -1,0 +1,12 @@
+{
+  "/api/addChance/route": "app/api/addChance/route.js",
+  "/api/addChances/route": "app/api/addChances/route.js",
+  "/api/getLeaderboard/route": "app/api/getLeaderboard/route.js",
+  "/api/initUser/route": "app/api/initUser/route.js",
+  "/api/getUser/route": "app/api/getUser/route.js",
+  "/api/saveScore/route": "app/api/saveScore/route.js",
+  "/api/updateUsername/route": "app/api/updateUsername/route.js",
+  "/api/useChance/route": "app/api/useChance/route.js",
+  "/_not-found/page": "app/_not-found/page.js",
+  "/page": "app/page.js"
+}

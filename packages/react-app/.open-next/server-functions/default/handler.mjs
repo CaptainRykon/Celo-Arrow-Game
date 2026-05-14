@@ -1,0 +1,1 @@
+export { handler } from "./packages/react-app/handler.mjs";
