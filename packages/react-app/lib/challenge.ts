@@ -1,57 +1,183 @@
-// src/lib/firebase.ts
+import {
+    ref,
+    get,
+    set,
+    update
+} from "firebase/database"
 
-import { initializeApp, getApps } from "firebase/app";
-import { getAuth, signInAnonymously, onAuthStateChanged } from "firebase/auth";
-import { getDatabase } from "firebase/database";
+import { db } from "./firebase"
 
-let app: any = null;
-let db: any = null;
-let auth: any = null;
-let authReady: Promise<void> | null = null;
+const DEFAULT_CHANCES = 1
+const CHALLENGE_COOLDOWN_HOURS = 24
 
-const firebaseConfig = {
-  apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY || "AIzaSyBvv2vMLgacfTYA-vjO9-o4NdVuMO64N3s",
-  authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN || "sanddrop-32496.firebaseapp.com",
-  projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID || "sanddrop-32496",
-  databaseURL:
-    process.env.NEXT_PUBLIC_FIREBASE_DATABASE_URL ||
-    "https://sanddrop-32496-default-rtdb.asia-southeast1.firebasedatabase.app",
-  storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET || "sanddrop-32496.firebasestorage.app",
-  messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID || "220945597047",
-  appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID || "1:220945597047:web:1ea931fb68294dc31ffc72",
-};
-
-// Function-based init (NOT auto-run)
-export function initFirebase() {
-  if (typeof window === "undefined") return;
-
-  if (app) return; // already initialized
-
-  app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0];
-
-  db = getDatabase(app, firebaseConfig.databaseURL);
-  auth = getAuth(app);
-
-  let resolveAuthReady!: () => void;
-
-  authReady = new Promise<void>((resolve) => {
-    resolveAuthReady = resolve;
-  });
-
-  signInAnonymously(auth).catch((error) => {
-    console.error("Firebase anonymous auth failed:", error);
-    resolveAuthReady();
-  });
-
-  onAuthStateChanged(auth, (user) => {
-    if (user) {
-      console.log("Firebase Ready:", user.uid);
-      resolveAuthReady();
-    }
-  });
+function getNow() {
+    return Date.now()
 }
 
-// getters (safe)
-export function getFirebase() {
-  return { app, db, auth, authReady };
+function getNextResetTime() {
+    const now = new Date()
+
+    now.setHours(24, 0, 0, 0)
+
+    return now.getTime()
+}
+
+export async function getChallengeProgress(
+    wallet: string
+) {
+    const snapshot = await get(
+        ref(db, `users/${wallet}/challenge`)
+    )
+
+    if (!snapshot.exists()) {
+        const defaultData = {
+            chances: DEFAULT_CHANCES,
+            lastResetUnixMilliseconds: getNow(),
+            streakCycleIndex: 0,
+            streakMask: 0,
+            bestTimeSeconds: -1
+        }
+
+        await set(
+            ref(db, `users/${wallet}/challenge`),
+            defaultData
+        )
+
+        return defaultData
+    }
+
+    const data = snapshot.val()
+
+    const now = getNow()
+
+    const diff =
+        now - (data.lastResetUnixMilliseconds || 0)
+
+    const cooldown =
+        CHALLENGE_COOLDOWN_HOURS *
+        60 *
+        60 *
+        1000
+
+    // daily reset
+    if (diff >= cooldown) {
+        data.chances = DEFAULT_CHANCES
+        data.lastResetUnixMilliseconds = now
+
+        await update(
+            ref(db, `users/${wallet}/challenge`),
+            {
+                chances: data.chances,
+                lastResetUnixMilliseconds:
+                    data.lastResetUnixMilliseconds
+            }
+        )
+    }
+
+    return data
+}
+
+export async function consumeChallengeChance(
+    wallet: string
+) {
+    const data = await getChallengeProgress(wallet)
+
+    if (data.chances <= 0) {
+        return {
+            success: false,
+            error: "No chances left"
+        }
+    }
+
+    data.chances -= 1
+
+    await update(
+        ref(db, `users/${wallet}/challenge`),
+        {
+            chances: data.chances
+        }
+    )
+
+    return {
+        success: true,
+        data
+    }
+}
+
+export async function addChallengeChances(
+    wallet: string,
+    amount: number
+) {
+    const data = await getChallengeProgress(wallet)
+
+    data.chances += amount
+
+    await update(
+        ref(db, `users/${wallet}/challenge`),
+        {
+            chances: data.chances
+        }
+    )
+
+    return {
+        success: true,
+        data
+    }
+}
+
+export async function updateBestChallengeTime(
+    wallet: string,
+    seconds: number
+) {
+    const data = await getChallengeProgress(wallet)
+
+    if (
+        data.bestTimeSeconds < 0 ||
+        seconds < data.bestTimeSeconds
+    ) {
+        data.bestTimeSeconds = seconds
+
+        await update(
+            ref(db, `users/${wallet}/challenge`),
+            {
+                bestTimeSeconds: seconds
+            }
+        )
+    }
+
+    return data
+}
+
+export async function updateChallengeStreak(
+    wallet: string,
+    cycleIndex: number,
+    dayIndex: number
+) {
+    const data = await getChallengeProgress(wallet)
+
+    if (data.streakCycleIndex !== cycleIndex) {
+        data.streakCycleIndex = cycleIndex
+        data.streakMask = 0
+    }
+
+    data.streakMask =
+        data.streakMask |
+        (1 << dayIndex)
+
+    await update(
+        ref(db, `users/${wallet}/challenge`),
+        {
+            streakCycleIndex:
+                data.streakCycleIndex,
+
+            streakMask:
+                data.streakMask
+        }
+    )
+
+    return data
+}
+
+export function getChallengeResetTime() {
+    return getNextResetTime()
 }
