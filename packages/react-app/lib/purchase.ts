@@ -27,9 +27,11 @@ import {
 } from "firebase/database"
 
 import { db } from "./firebase"
-
-const GAME_CONTRACT: Address =
-    "0xafFb98DeCfc3e1E7867fA412Bf9580E377bE265a"
+export type PaymentToken =
+    | "USDT"
+    | "USDC"
+const GAME_CONTRACT =
+    "0xd9a8665a4Bb8cde69Ba478F39924891D6e977eB7"
 
 const USDT_CONTRACT: Address =
     "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e"
@@ -61,7 +63,15 @@ const ERC20_ABI = [
 
 const PAYMENT_ABI = [
     {
-        name: "pay",
+        name: "payWithUSDT",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [],
+        outputs: []
+    },
+
+    {
+        name: "payWithUSDC",
         type: "function",
         stateMutability: "nonpayable",
         inputs: [],
@@ -144,7 +154,9 @@ async function approveIfNeeded(
     )
 }
 
-async function sendPayment() {
+async function sendPayment(
+    token: PaymentToken
+) {
     const wallet = await getWallet()
 
     await ensureCeloNetwork()
@@ -163,7 +175,12 @@ async function sendPayment() {
     const paymentData =
         encodeFunctionData({
             abi: PAYMENT_ABI,
-            functionName: "pay",
+
+            functionName:
+                token === "USDC"
+                    ? "payWithUSDC"
+                    : "payWithUSDT",
+
             args: []
         })
 
@@ -184,8 +201,10 @@ async function sendPayment() {
     return wallet
 }
 
-export async function purchaseGame() {
-    const wallet = await sendPayment()
+export async function purchaseGame(
+    token: PaymentToken = "USDT"
+) {
+    const wallet = await sendPayment(token)
 
     await update(
         ref(db, `users/${wallet}`),
@@ -200,9 +219,10 @@ export async function purchaseGame() {
 }
 
 export async function purchaseHints(
-    amount: number
+    amount: number,
+    token: PaymentToken = "USDT"
 ) {
-    const wallet = await sendPayment()
+    const wallet = await sendPayment(token)
 
     const snapshot = await get(
         ref(db, `users/${wallet}`)
@@ -230,9 +250,10 @@ export async function purchaseHints(
 }
 
 export async function purchaseLives(
-    amount: number
+    amount: number,
+    token: PaymentToken = "USDT"
 ) {
-    const wallet = await sendPayment()
+    const wallet = await sendPayment(token)
 
     const snapshot = await get(
         ref(db, `users/${wallet}`)
