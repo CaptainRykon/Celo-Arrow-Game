@@ -26,7 +26,7 @@ import {
     set
 } from "firebase/database"
 
-import { db } from "./firebase"
+import { getDb } from "./firebase"
 export type PaymentToken =
     | "USDT"
     | "USDC"
@@ -207,7 +207,7 @@ export async function purchaseGame(
     const wallet = await sendPayment(token)
 
     await update(
-        ref(db, `users/${wallet}`),
+        ref(getDb(), `users/${wallet}`),
         {
             hasPurchasedGame: true
         }
@@ -225,7 +225,7 @@ export async function purchaseHints(
     const wallet = await sendPayment(token)
 
     const snapshot = await get(
-        ref(db, `users/${wallet}`)
+        ref(getDb(), `users/${wallet}`)
     )
 
     const user =
@@ -237,7 +237,7 @@ export async function purchaseHints(
         (user.hints || 0) + amount
 
     await update(
-        ref(db, `users/${wallet}`),
+        ref(getDb(), `users/${wallet}`),
         {
             hints
         }
@@ -256,7 +256,7 @@ export async function purchaseLives(
     const wallet = await sendPayment(token)
 
     const snapshot = await get(
-        ref(db, `users/${wallet}`)
+        ref(getDb(), `users/${wallet}`)
     )
 
     const user =
@@ -268,7 +268,7 @@ export async function purchaseLives(
         (user.lives || 0) + amount
 
     await update(
-        ref(db, `users/${wallet}`),
+        ref(getDb(), `users/${wallet}`),
         {
             lives
         }

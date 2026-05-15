@@ -5,7 +5,7 @@ import {
     update
 } from "firebase/database"
 
-import { db } from "./firebase"
+import { getDb } from "./firebase"
 
 const DEFAULT_CHANCES = 1
 const CHALLENGE_COOLDOWN_HOURS = 24
@@ -26,7 +26,7 @@ export async function getChallengeProgress(
     wallet: string
 ) {
     const snapshot = await get(
-        ref(db, `users/${wallet}/challenge`)
+        ref(getDb(), `users/${wallet}/challenge`)
     )
 
     if (!snapshot.exists()) {
@@ -39,7 +39,7 @@ export async function getChallengeProgress(
         }
 
         await set(
-            ref(db, `users/${wallet}/challenge`),
+            ref(getDb(), `users/${wallet}/challenge`),
             defaultData
         )
 
@@ -65,7 +65,7 @@ export async function getChallengeProgress(
         data.lastResetUnixMilliseconds = now
 
         await update(
-            ref(db, `users/${wallet}/challenge`),
+            ref(getDb(), `users/${wallet}/challenge`),
             {
                 chances: data.chances,
                 lastResetUnixMilliseconds:
@@ -92,7 +92,7 @@ export async function consumeChallengeChance(
     data.chances -= 1
 
     await update(
-        ref(db, `users/${wallet}/challenge`),
+        ref(getDb(), `users/${wallet}/challenge`),
         {
             chances: data.chances
         }
@@ -113,7 +113,7 @@ export async function addChallengeChances(
     data.chances += amount
 
     await update(
-        ref(db, `users/${wallet}/challenge`),
+        ref(getDb(), `users/${wallet}/challenge`),
         {
             chances: data.chances
         }
@@ -138,7 +138,7 @@ export async function updateBestChallengeTime(
         data.bestTimeSeconds = seconds
 
         await update(
-            ref(db, `users/${wallet}/challenge`),
+            ref(getDb(), `users/${wallet}/challenge`),
             {
                 bestTimeSeconds: seconds
             }
@@ -165,7 +165,7 @@ export async function updateChallengeStreak(
         (1 << dayIndex)
 
     await update(
-        ref(db, `users/${wallet}/challenge`),
+        ref(getDb(), `users/${wallet}/challenge`),
         {
             streakCycleIndex:
                 data.streakCycleIndex,

@@ -7,7 +7,7 @@ import {
     limitToFirst
 } from "firebase/database"
 
-import { db } from "./firebase"
+import { getDb } from "./firebase"
 
 export interface LeaderboardEntry {
     rank: number
@@ -32,7 +32,7 @@ export async function submitChallengeScore(
     completionSeconds: number
 ) {
     const playerRef = ref(
-        db,
+        getDb(),
         `${getLeaderboardPath(
             cycleIndex,
             patternName
@@ -79,7 +79,7 @@ export async function getChallengeLeaderboard(
 ) {
     const leaderboardRef = query(
         ref(
-            db,
+            getDb(),
             getLeaderboardPath(
                 cycleIndex,
                 patternName
@@ -124,7 +124,7 @@ export async function getChallengeLeaderboard(
     if (playerWallet) {
         const allSnapshot = await get(
             ref(
-                db,
+                getDb(),
                 getLeaderboardPath(
                     cycleIndex,
                     patternName

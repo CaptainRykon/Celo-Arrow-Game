@@ -1,5 +1,5 @@
-import { initializeApp, getApps } from "firebase/app"
-import { getDatabase } from "firebase/database"
+import { initializeApp, getApps, type FirebaseApp } from "firebase/app"
+import { getDatabase, type Database } from "firebase/database"
 
 const firebaseConfig = {
     apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
@@ -11,9 +11,27 @@ const firebaseConfig = {
     appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID
 }
 
-const app =
-    getApps().length > 0
-        ? getApps()[0]
-        : initializeApp(firebaseConfig)
+let cachedApp: FirebaseApp | undefined
+let cachedDb: Database | undefined
 
-export const db = getDatabase(app)
+function getFirebaseApp(): FirebaseApp {
+    if (cachedApp) {
+        return cachedApp
+    }
+
+    if (getApps().length > 0) {
+        cachedApp = getApps()[0]
+        return cachedApp
+    }
+
+    cachedApp = initializeApp(firebaseConfig)
+    return cachedApp
+}
+
+export function getDb(): Database {
+    if (!cachedDb) {
+        cachedDb = getDatabase(getFirebaseApp())
+    }
+
+    return cachedDb
+}

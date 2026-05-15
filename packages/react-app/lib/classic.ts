@@ -1,9 +1,9 @@
 import { ref, get, set } from "firebase/database"
-import { db } from "./firebase"
+import { getDb } from "./firebase"
 
 export async function getClassicProgress(wallet: string) {
     const snapshot = await get(
-        ref(db, `users/${wallet}/classic`)
+        ref(getDb(), `users/${wallet}/classic`)
     )
 
     if (!snapshot.exists()) {
@@ -20,7 +20,7 @@ export async function saveClassicProgress(
     data: any
 ) {
     await set(
-        ref(db, `users/${wallet}/classic`),
+        ref(getDb(), `users/${wallet}/classic`),
         data
     )
 }

@@ -3,7 +3,7 @@ import { NextResponse } from "next/server"
 import {
     submitChallengeScore,
     getChallengeLeaderboard
-} from "@/lib/leaderboard"
+} from "@/lib/Leaderboard"
 
 
 export async function POST(
