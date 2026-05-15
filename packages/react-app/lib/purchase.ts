@@ -14,11 +14,13 @@ import {
     ref,
     update,
     get,
-    set
+    set,
+    remove
 } from "firebase/database"
 
 import { getDb } from "./firebase"
 import type {
+    UniversalProgress,
     UserSnapshot
 } from "./types"
 
@@ -31,14 +33,20 @@ const GAME_CONTRACT =
 const USDT_CONTRACT: Address =
     "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e"
 
-const GAME_PRICE = BigInt(500000)
+const DEFAULT_UNIVERSAL: UniversalProgress = {
+    weeklyChallengeCycleIndex: 0,
+    weeklyChallengeEndUnixMilliseconds: 0
+}
 
-const HINT_PRICE = BigInt(990000)
-
-const LIVES_PRICE = BigInt(1990000)
+function normalizeWalletAddress(
+    walletAddress: string
+) {
+    return walletAddress.trim()
+}
 
 function buildDefaultUserSnapshot(
-    walletAddress: string
+    walletAddress: string,
+    universal: UniversalProgress = DEFAULT_UNIVERSAL
 ): UserSnapshot {
     return {
         walletAddress,
@@ -59,20 +67,44 @@ function buildDefaultUserSnapshot(
             streakMask: 0,
             bestTimeSeconds: -1
         },
-        universal: {
-            weeklyChallengeCycleIndex: 0,
-            weeklyChallengeEndUnixMilliseconds: 0
-        }
+        universal
+    }
+}
+
+function buildStoredUserRecord(
+    snapshot: UserSnapshot
+) {
+    return {
+        walletAddress:
+            snapshot.walletAddress,
+        username:
+            snapshot.username,
+        hasPurchasedGame:
+            snapshot.hasPurchasedGame,
+        revives:
+            snapshot.revives,
+        lives:
+            snapshot.revives,
+        hints:
+            snapshot.hints,
+        tutorialCompleted:
+            snapshot.tutorialCompleted,
+        classic:
+            snapshot.classic,
+        challenge:
+            snapshot.challenge
     }
 }
 
 function mergeSnapshot(
     walletAddress: string,
-    raw: any
+    raw: any,
+    universal: UniversalProgress
 ): UserSnapshot {
     const base =
         buildDefaultUserSnapshot(
-            walletAddress
+            walletAddress,
+            universal
         )
 
     const revives =
@@ -149,28 +181,56 @@ function mergeSnapshot(
                     base.challenge.bestTimeSeconds
                 )
         },
-        universal: {
-            weeklyChallengeCycleIndex:
-                Number(
-                    raw?.universal?.weeklyChallengeCycleIndex ??
-                    base.universal.weeklyChallengeCycleIndex
-                ),
-            weeklyChallengeEndUnixMilliseconds:
-                Number(
-                    raw?.universal?.weeklyChallengeEndUnixMilliseconds ??
-                    base.universal.weeklyChallengeEndUnixMilliseconds
-                )
-        }
+        universal
+    }
+}
+
+async function getUniversalSnapshot() {
+    const universalRef =
+        ref(
+            getDb(),
+            "universal/currentChallenge"
+        )
+
+    const snapshot =
+        await get(universalRef)
+
+    if (!snapshot.exists()) {
+        await set(
+            universalRef,
+            DEFAULT_UNIVERSAL
+        )
+
+        return DEFAULT_UNIVERSAL
+    }
+
+    return {
+        weeklyChallengeCycleIndex:
+            Number(
+                snapshot.val()?.weeklyChallengeCycleIndex ??
+                DEFAULT_UNIVERSAL.weeklyChallengeCycleIndex
+            ),
+        weeklyChallengeEndUnixMilliseconds:
+            Number(
+                snapshot.val()?.weeklyChallengeEndUnixMilliseconds ??
+                DEFAULT_UNIVERSAL.weeklyChallengeEndUnixMilliseconds
+            )
     }
 }
 
 async function getOrCreateUserSnapshot(
     wallet: Address
 ) {
+    const normalizedWallet =
+        normalizeWalletAddress(wallet)
+
+    const universal =
+        await getUniversalSnapshot()
+
     const userRef =
         ref(
             getDb(),
-            `users/${wallet}`
+            `users/${normalizedWallet}`
         )
 
     const snapshot =
@@ -178,21 +238,40 @@ async function getOrCreateUserSnapshot(
 
     if (!snapshot.exists()) {
         const user =
-            buildDefaultUserSnapshot(wallet)
+            buildDefaultUserSnapshot(
+                normalizedWallet,
+                universal
+            )
 
-        await set(userRef, user)
+        await set(
+            userRef,
+            buildStoredUserRecord(user)
+        )
+        await remove(
+            ref(
+                getDb(),
+                `users/${normalizedWallet}/universal`
+            )
+        )
         return user
     }
 
     const user =
         mergeSnapshot(
-            wallet,
-            snapshot.val()
+            normalizedWallet,
+            snapshot.val(),
+            universal
         )
 
     await set(
         userRef,
-        user
+        buildStoredUserRecord(user)
+    )
+    await remove(
+        ref(
+            getDb(),
+            `users/${normalizedWallet}/universal`
+        )
     )
 
     return user
@@ -310,60 +389,118 @@ async function approveIfNeeded(
     )
 }
 
+function normalizeMiniPayError(
+    error: unknown
+) {
+    const rawMessage =
+        error instanceof Error
+            ? error.message
+            : String(error || "Payment failed")
+
+    const lower =
+        rawMessage.toLowerCase()
+
+    if (
+        lower.includes("user rejected") ||
+        lower.includes("user denied") ||
+        lower.includes("cancel")
+    ) {
+        return "Payment was cancelled."
+    }
+
+    if (
+        lower.includes("insufficient")
+    ) {
+        return "Payment failed due to insufficient balance."
+    }
+
+    if (
+        lower.includes("wallet not found") ||
+        lower.includes("no wallet")
+    ) {
+        return "MiniPay wallet not found."
+    }
+
+    if (
+        lower.includes("wrong network")
+    ) {
+        return "Please switch MiniPay to the Celo network."
+    }
+
+    return rawMessage
+}
+
 async function sendPayment(
     token: PaymentToken
 ) {
-    const wallet = await getWallet()
+    try {
+        const wallet = await getWallet()
 
-    await ensureCeloNetwork()
+        await ensureCeloNetwork()
 
-    await approveIfNeeded(
-        wallet,
-        "minipay_approved"
-    )
+        await approveIfNeeded(
+            wallet,
+            "minipay_approved"
+        )
 
-    const ethereum = getEthereum()
+        const ethereum = getEthereum()
 
-    if (!ethereum) {
-        throw new Error("Wallet missing")
+        if (!ethereum) {
+            throw new Error("Wallet missing")
+        }
+
+        const paymentData =
+            encodeFunctionData({
+                abi: PAYMENT_ABI,
+
+                functionName:
+                    token === "USDC"
+                        ? "payWithUSDC"
+                        : "payWithUSDT",
+
+                args: []
+            })
+
+        const tx =
+            await ethereum.request({
+                method: "eth_sendTransaction",
+                params: [
+                    {
+                        from: wallet,
+                        to: GAME_CONTRACT,
+                        data: paymentData
+                    }
+                ]
+            })
+
+        await waitForTransaction(tx)
+
+        return wallet
+    } catch (error) {
+        throw new Error(
+            normalizeMiniPayError(error)
+        )
     }
-
-    const paymentData =
-        encodeFunctionData({
-            abi: PAYMENT_ABI,
-
-            functionName:
-                token === "USDC"
-                    ? "payWithUSDC"
-                    : "payWithUSDT",
-
-            args: []
-        })
-
-    const tx =
-        await ethereum.request({
-            method: "eth_sendTransaction",
-            params: [
-                {
-                    from: wallet,
-                    to: GAME_CONTRACT,
-                    data: paymentData
-                }
-            ]
-        })
-
-    await waitForTransaction(tx)
-
-    return wallet
 }
 
-export async function purchaseGame(
+export async function runMiniPayPayment(
     token: PaymentToken = "USDT"
 ) {
-    const wallet = await sendPayment(token)
+    return await sendPayment(token)
+}
 
+export async function completeGamePurchase(
+    walletAddress: string
+) {
     const user =
-        await getOrCreateUserSnapshot(wallet)
+        await getOrCreateUserSnapshot(
+            walletAddress as Address
+        )
+
+    const wallet =
+        normalizeWalletAddress(
+            walletAddress
+        )
 
     const snapshot = {
         ...user,
@@ -372,7 +509,13 @@ export async function purchaseGame(
 
     await update(
         ref(getDb(), `users/${wallet}`),
-        snapshot
+        buildStoredUserRecord(snapshot)
+    )
+    await remove(
+        ref(
+            getDb(),
+            `users/${wallet}/universal`
+        )
     )
 
     return {
@@ -381,17 +524,22 @@ export async function purchaseGame(
     }
 }
 
-export async function purchaseHints(
-    amount: number,
-    token: PaymentToken = "USDT"
+export async function completeHintPurchase(
+    walletAddress: string,
+    amount: number
 ) {
-    const wallet = await sendPayment(token)
-
     const user =
-        await getOrCreateUserSnapshot(wallet)
+        await getOrCreateUserSnapshot(
+            walletAddress as Address
+        )
+
+    const wallet =
+        normalizeWalletAddress(
+            walletAddress
+        )
 
     const hints =
-        user.hints + amount
+        user.hints + Math.max(0, amount)
 
     const snapshot = {
         ...user,
@@ -400,7 +548,13 @@ export async function purchaseHints(
 
     await update(
         ref(getDb(), `users/${wallet}`),
-        snapshot
+        buildStoredUserRecord(snapshot)
+    )
+    await remove(
+        ref(
+            getDb(),
+            `users/${wallet}/universal`
+        )
     )
 
     return {
@@ -409,17 +563,22 @@ export async function purchaseHints(
     }
 }
 
-export async function purchaseLives(
-    amount: number,
-    token: PaymentToken = "USDT"
+export async function completeRevivePurchase(
+    walletAddress: string,
+    amount: number
 ) {
-    const wallet = await sendPayment(token)
-
     const user =
-        await getOrCreateUserSnapshot(wallet)
+        await getOrCreateUserSnapshot(
+            walletAddress as Address
+        )
+
+    const wallet =
+        normalizeWalletAddress(
+            walletAddress
+        )
 
     const revives =
-        user.revives + amount
+        user.revives + Math.max(0, amount)
 
     const snapshot = {
         ...user,
@@ -429,7 +588,13 @@ export async function purchaseLives(
 
     await update(
         ref(getDb(), `users/${wallet}`),
-        snapshot
+        buildStoredUserRecord(snapshot)
+    )
+    await remove(
+        ref(
+            getDb(),
+            `users/${wallet}/universal`
+        )
     )
 
     return {

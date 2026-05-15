@@ -17,6 +17,10 @@ import {
     apiPost
 } from "@/lib/api"
 
+import {
+    runMiniPayPayment
+} from "@/lib/purchase"
+
 declare global {
     interface Window {
         unityInstance?: any
@@ -285,12 +289,19 @@ export default function GameClient() {
     ) {
 
         try {
+            const wallet =
+                await runMiniPayPayment(
+                    payload?.token ||
+                    "USDT"
+                )
 
             const response =
                 await apiPost(
                     "/api/purchase",
                     {
                         action: "game",
+                        walletAddress:
+                            wallet,
 
                         token:
                             payload?.token ||
@@ -330,12 +341,19 @@ export default function GameClient() {
     ) {
 
         try {
+            const wallet =
+                await runMiniPayPayment(
+                    payload?.token ||
+                    "USDT"
+                )
 
             const response =
                 await apiPost(
                     "/api/purchase",
                     {
                         action: "hints",
+                        walletAddress:
+                            wallet,
 
                         amount:
                             payload?.amount || 1,
@@ -378,12 +396,19 @@ export default function GameClient() {
     ) {
 
         try {
+            const wallet =
+                await runMiniPayPayment(
+                    payload?.token ||
+                    "USDT"
+                )
 
             const response =
                 await apiPost(
                     "/api/purchase",
                     {
                         action: "lives",
+                        walletAddress:
+                            wallet,
 
                         amount:
                             payload?.amount || 1,

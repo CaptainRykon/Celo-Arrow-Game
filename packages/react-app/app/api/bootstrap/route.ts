@@ -3,14 +3,21 @@ import { NextResponse } from "next/server"
 import {
     ref,
     get,
-    set
+    set,
+    remove
 } from "firebase/database"
 
 import { getDb } from "@/lib/firebase"
-import type { UserSnapshot } from "@/lib/types"
+import type { UniversalProgress, UserSnapshot } from "@/lib/types"
+
+const DEFAULT_UNIVERSAL: UniversalProgress = {
+    weeklyChallengeCycleIndex: 0,
+    weeklyChallengeEndUnixMilliseconds: 0
+}
 
 function buildDefaultUser(
-    walletAddress: string
+    walletAddress: string,
+    universal: UniversalProgress
 ): UserSnapshot {
     return {
         walletAddress,
@@ -31,10 +38,65 @@ function buildDefaultUser(
             streakMask: 0,
             bestTimeSeconds: -1
         },
-        universal: {
-            weeklyChallengeCycleIndex: 0,
-            weeklyChallengeEndUnixMilliseconds: 0
-        }
+        universal
+    }
+}
+
+function buildStoredUser(
+    snapshot: UserSnapshot
+) {
+    return {
+        walletAddress:
+            snapshot.walletAddress,
+        username:
+            snapshot.username,
+        hasPurchasedGame:
+            snapshot.hasPurchasedGame,
+        revives:
+            snapshot.revives,
+        lives:
+            snapshot.revives,
+        hints:
+            snapshot.hints,
+        tutorialCompleted:
+            snapshot.tutorialCompleted,
+        classic:
+            snapshot.classic,
+        challenge:
+            snapshot.challenge
+    }
+}
+
+async function getUniversalData() {
+    const universalRef =
+        ref(
+            getDb(),
+            "universal/currentChallenge"
+        )
+
+    const snapshot =
+        await get(universalRef)
+
+    if (!snapshot.exists()) {
+        await set(
+            universalRef,
+            DEFAULT_UNIVERSAL
+        )
+
+        return DEFAULT_UNIVERSAL
+    }
+
+    return {
+        weeklyChallengeCycleIndex:
+            Number(
+                snapshot.val()?.weeklyChallengeCycleIndex ??
+                DEFAULT_UNIVERSAL.weeklyChallengeCycleIndex
+            ),
+        weeklyChallengeEndUnixMilliseconds:
+            Number(
+                snapshot.val()?.weeklyChallengeEndUnixMilliseconds ??
+                DEFAULT_UNIVERSAL.weeklyChallengeEndUnixMilliseconds
+            )
     }
 }
 
@@ -72,6 +134,9 @@ export async function POST(
                 `users/${wallet}`
             )
 
+        const universal =
+            await getUniversalData()
+
         const snapshot =
             await get(userRef)
 
@@ -82,11 +147,20 @@ export async function POST(
         if (!snapshot.exists()) {
 
             const newUser =
-                buildDefaultUser(wallet)
+                buildDefaultUser(
+                    wallet,
+                    universal
+                )
 
             await set(
                 userRef,
-                newUser
+                buildStoredUser(newUser)
+            )
+            await remove(
+                ref(
+                    getDb(),
+                    `users/${wallet}/universal`
+                )
             )
 
             return NextResponse.json({
@@ -99,8 +173,18 @@ export async function POST(
         // EXISTING USER
         // =====================================================
 
+        await remove(
+            ref(
+                getDb(),
+                `users/${wallet}/universal`
+            )
+        )
+
         const existingUser = {
-            ...buildDefaultUser(wallet),
+            ...buildDefaultUser(
+                wallet,
+                universal
+            ),
             ...snapshot.val(),
             revives:
                 Math.max(
@@ -115,7 +199,8 @@ export async function POST(
                     snapshot.val()?.revives ??
                     snapshot.val()?.lives ??
                     3
-                )
+                ),
+            universal
         }
 
         return NextResponse.json({

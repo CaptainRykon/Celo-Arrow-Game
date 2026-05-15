@@ -8,7 +8,21 @@ export async function apiPost(url: string, body: any) {
     })
 
     if (!res.ok) {
-        throw new Error(await res.text())
+        const rawBody =
+            await res.text()
+
+        try {
+            const parsed =
+                JSON.parse(rawBody)
+
+            throw new Error(
+                parsed?.error ||
+                parsed?.message ||
+                rawBody
+            )
+        } catch {
+            throw new Error(rawBody)
+        }
     }
 
     return await res.json()

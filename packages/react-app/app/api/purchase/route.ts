@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server"
 
 import {
-  purchaseGame,
-  purchaseHints,
-  purchaseLives
+  completeGamePurchase,
+  completeHintPurchase,
+  completeRevivePurchase
 } from "@/lib/purchase"
 
 export async function POST(
@@ -16,9 +16,21 @@ export async function POST(
       const action =
           body.action
 
-
-      const token =
-          body.token || "USDT"
+      const walletAddress =
+          typeof body.walletAddress === "string"
+            ? body.walletAddress.trim()
+            : ""
+    if (!walletAddress) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Wallet missing"
+        },
+        {
+          status: 400
+        }
+      )
+    }
 
     // =========================
     // PURCHASE GAME
@@ -27,7 +39,7 @@ export async function POST(
       action === "game"
     ) {
       const result =
-          await purchaseGame(token)
+          await completeGamePurchase(walletAddress)
 
       return NextResponse.json({
         success: true,
@@ -47,9 +59,9 @@ export async function POST(
         )
 
       const result =
-          await purchaseHints(
-              amount,
-              token
+          await completeHintPurchase(
+              walletAddress,
+              amount
           )
 
       return NextResponse.json({
@@ -70,9 +82,9 @@ export async function POST(
         )
 
       const result =
-          await purchaseLives(
-              amount,
-              token
+          await completeRevivePurchase(
+              walletAddress,
+              amount
           )
 
       return NextResponse.json({

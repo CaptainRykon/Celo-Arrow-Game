@@ -4,7 +4,8 @@ import {
     ref,
     update,
     get,
-    set
+    set,
+    remove
 } from "firebase/database"
 
 import { getDb } from "@/lib/firebase"
@@ -136,14 +137,59 @@ export async function POST(
         if (!existing.exists()) {
             await set(
                 userRef,
-                cleanSnapshot
+                {
+                    walletAddress:
+                        cleanSnapshot.walletAddress,
+                    username:
+                        cleanSnapshot.username,
+                    hasPurchasedGame:
+                        cleanSnapshot.hasPurchasedGame,
+                    revives:
+                        cleanSnapshot.revives,
+                    lives:
+                        cleanSnapshot.revives,
+                    hints:
+                        cleanSnapshot.hints,
+                    tutorialCompleted:
+                        cleanSnapshot.tutorialCompleted,
+                    classic:
+                        cleanSnapshot.classic,
+                    challenge:
+                        cleanSnapshot.challenge
+                }
             )
         } else {
             await update(
                 userRef,
-                cleanSnapshot
+                {
+                    walletAddress:
+                        cleanSnapshot.walletAddress,
+                    username:
+                        cleanSnapshot.username,
+                    hasPurchasedGame:
+                        cleanSnapshot.hasPurchasedGame,
+                    revives:
+                        cleanSnapshot.revives,
+                    lives:
+                        cleanSnapshot.revives,
+                    hints:
+                        cleanSnapshot.hints,
+                    tutorialCompleted:
+                        cleanSnapshot.tutorialCompleted,
+                    classic:
+                        cleanSnapshot.classic,
+                    challenge:
+                        cleanSnapshot.challenge
+                }
             )
         }
+
+        await remove(
+            ref(
+                getDb(),
+                `users/${cleanSnapshot.walletAddress}/universal`
+            )
+        )
 
         // UPDATE UNIVERSAL DATA
         await update(
