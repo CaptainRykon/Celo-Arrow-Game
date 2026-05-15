@@ -307,9 +307,8 @@ export default function GameClient() {
 
             sendToUnity(
                 "OnGamePurchaseSuccess",
-                JSON.stringify(
-                    response.result
-                )
+                response.result
+                    ?.snapshot || ""
             )
 
         } catch (error: any) {
@@ -356,9 +355,8 @@ export default function GameClient() {
 
             sendToUnity(
                 "OnHintPurchaseSuccess",
-                JSON.stringify(
-                    response.result
-                )
+                response.result
+                    ?.snapshot || ""
             )
 
         } catch (error: any) {
@@ -405,9 +403,8 @@ export default function GameClient() {
 
             sendToUnity(
                 "OnLivesPurchaseSuccess",
-                JSON.stringify(
-                    response.result
-                )
+                response.result
+                    ?.snapshot || ""
             )
 
         } catch (error: any) {

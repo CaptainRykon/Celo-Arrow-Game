@@ -16,6 +16,14 @@ import type {
 function sanitizeSnapshot(
     snapshot: UserSnapshot
 ): UserSnapshot {
+    const revives =
+        Math.max(
+            0,
+            snapshot.revives ??
+            snapshot.lives ??
+            0
+        )
+
     return {
         walletAddress:
             snapshot.walletAddress || "",
@@ -26,11 +34,9 @@ function sanitizeSnapshot(
         hasPurchasedGame:
             !!snapshot.hasPurchasedGame,
 
-        lives:
-            Math.max(
-                0,
-                snapshot.lives || 0
-            ),
+        revives,
+
+        lives: revives,
 
         hints:
             Math.max(

@@ -7,6 +7,36 @@ import {
 } from "firebase/database"
 
 import { getDb } from "@/lib/firebase"
+import type { UserSnapshot } from "@/lib/types"
+
+function buildDefaultUser(
+    walletAddress: string
+): UserSnapshot {
+    return {
+        walletAddress,
+        username: "Player",
+        hasPurchasedGame: false,
+        revives: 3,
+        lives: 3,
+        hints: 0,
+        tutorialCompleted: false,
+        classic: {
+            level: 1
+        },
+        challenge: {
+            chances: 1,
+            lastResetUnixMilliseconds:
+                Date.now(),
+            streakCycleIndex: 0,
+            streakMask: 0,
+            bestTimeSeconds: -1
+        },
+        universal: {
+            weeklyChallengeCycleIndex: 0,
+            weeklyChallengeEndUnixMilliseconds: 0
+        }
+    }
+}
 
 export async function POST(
     request: Request
@@ -18,7 +48,9 @@ export async function POST(
             await request.json()
 
         const wallet =
-            body.walletAddress
+            typeof body.walletAddress === "string"
+                ? body.walletAddress.trim()
+                : ""
 
         if (!wallet) {
 
@@ -49,45 +81,8 @@ export async function POST(
 
         if (!snapshot.exists()) {
 
-            const newUser = {
-
-                walletAddress:
-                    wallet,
-
-                username:
-                    "Player",
-
-                hasPurchasedGame:
-                    false,
-
-                lives: 3,
-
-                hints: 0,
-
-                tutorialCompleted:
-                    false,
-
-                classic: {
-                    level: 1
-                },
-
-                challenge: {
-                    chances: 1,
-                    lastResetUnixMilliseconds:
-                        Date.now(),
-
-                    streakCycleIndex: 0,
-                    streakMask: 0,
-
-                    bestTimeSeconds: -1
-                },
-
-                universal: {
-                    weeklyChallengeCycleIndex: 0,
-
-                    weeklyChallengeEndUnixMilliseconds: 0
-                }
-            }
+            const newUser =
+                buildDefaultUser(wallet)
 
             await set(
                 userRef,
@@ -104,10 +99,29 @@ export async function POST(
         // EXISTING USER
         // =====================================================
 
+        const existingUser = {
+            ...buildDefaultUser(wallet),
+            ...snapshot.val(),
+            revives:
+                Math.max(
+                    0,
+                    snapshot.val()?.revives ??
+                    snapshot.val()?.lives ??
+                    3
+                ),
+            lives:
+                Math.max(
+                    0,
+                    snapshot.val()?.revives ??
+                    snapshot.val()?.lives ??
+                    3
+                )
+        }
+
         return NextResponse.json({
             success: true,
             snapshot:
-                snapshot.val()
+                existingUser
         })
 
     } catch (error: any) {
