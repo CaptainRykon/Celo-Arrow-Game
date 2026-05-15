@@ -7,7 +7,7 @@ import {
     set
 } from "firebase/database"
 
-import { db } from "@/lib/firebase"
+import { getDb } from "@/lib/firebase"
 
 import type {
     UserSnapshot
@@ -119,7 +119,7 @@ export async function POST(
             )
 
         const userRef = ref(
-            db,
+            getDb(),
             `users/${cleanSnapshot.walletAddress}`
         )
 
@@ -142,7 +142,7 @@ export async function POST(
         // UPDATE UNIVERSAL DATA
         await update(
             ref(
-                db,
+                getDb(),
                 "universal/currentChallenge"
             ),
             cleanSnapshot.universal

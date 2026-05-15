@@ -6,7 +6,7 @@ import {
     set
 } from "firebase/database"
 
-import { db } from "@/lib/firebase"
+import { getDb } from "@/lib/firebase"
 
 import {
     getClassicProgress
@@ -89,7 +89,7 @@ export async function POST(
         }
 
         const userRef = ref(
-            db,
+            getDb(),
             `users/${wallet}`
         )
 
