@@ -1,10 +1,10 @@
 import { ref, get, set } from "firebase/database"
-import { db } from "./firebase"
+import { getDb } from "./firebase"
 
 const UNIVERSAL_PATH = "universal/currentChallenge"
 
 export async function getUniversalData() {
-    const snapshot = await get(ref(db, UNIVERSAL_PATH))
+    const snapshot = await get(ref(getDb(), UNIVERSAL_PATH))
 
     if (!snapshot.exists()) {
         return null
@@ -14,5 +14,5 @@ export async function getUniversalData() {
 }
 
 export async function setUniversalData(data: any) {
-    await set(ref(db, UNIVERSAL_PATH), data)
+    await set(ref(getDb(), UNIVERSAL_PATH), data)
 }
