@@ -31,7 +31,7 @@ const GAME_CONTRACT: Address =
     (
         process.env
             .NEXT_PUBLIC_GAME_ENTRY_CONTRACT ||
-        "0xd9a8665a4Bb8cde69Ba478F39924891D6e977eB7"
+        "0x927864875719A2357ADf3be81df7ccA1779dCAE6"
     ) as Address
 
 const FALLBACK_USDT_CONTRACT: Address =
