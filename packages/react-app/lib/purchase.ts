@@ -834,6 +834,34 @@ async function getTokenBalance(
     return BigInt(result as string)
 }
 
+async function getLegacyTokenBalance(
+    wallet: Address,
+    token: PaymentToken,
+    currentTokenContract: Address
+) {
+    const legacyTokenContract =
+        token === "USDC"
+            ? FALLBACK_USDC_CONTRACT
+            : FALLBACK_USDT_CONTRACT
+
+    if (
+        legacyTokenContract
+            .toLowerCase() ===
+        currentTokenContract.toLowerCase()
+    ) {
+        return BigInt(0)
+    }
+
+    try {
+        return await getTokenBalance(
+            wallet,
+            legacyTokenContract
+        )
+    } catch {
+        return BigInt(0)
+    }
+}
+
 async function approveIfNeeded(
     wallet: Address,
     token: PaymentToken,
@@ -1036,6 +1064,22 @@ async function sendPayment(
             tokenBalance <
                 paymentConfig.fee
         ) {
+            const legacyTokenBalance =
+                await getLegacyTokenBalance(
+                    wallet,
+                    token,
+                    paymentConfig.tokenContract
+                )
+
+            if (
+                legacyTokenBalance >=
+                paymentConfig.fee
+            ) {
+                throw new Error(
+                    `Your wallet has ${token} on a different token contract. This game contract expects ${paymentConfig.tokenContract}, but your available balance is on ${token === "USDC" ? FALLBACK_USDC_CONTRACT : FALLBACK_USDT_CONTRACT}.`
+                )
+            }
+
             throw new Error(
                 `Payment failed due to insufficient ${token} balance.`
             )
