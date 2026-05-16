@@ -18,6 +18,7 @@ import {
 } from "@/lib/api"
 
 import {
+    getEntryPaymentStatus,
     runMiniPayPayment
 } from "@/lib/purchase"
 
@@ -205,8 +206,7 @@ export default function GameClient() {
     async function bootstrap(
         wallet: string
     ) {
-
-        const response =
+        let response =
             await apiPost(
                 "/api/bootstrap",
                 {
@@ -220,6 +220,56 @@ export default function GameClient() {
             throw new Error(
                 response.error
             )
+        }
+
+        if (
+            !response.snapshot
+                ?.hasPurchasedGame
+        ) {
+            try {
+                const paymentStatus =
+                    await getEntryPaymentStatus(
+                        wallet as `0x${string}`
+                    )
+
+                if (
+                    paymentStatus.payCount >
+                        BigInt(0) ||
+                    paymentStatus.payCountUSDT >
+                        BigInt(0) ||
+                    paymentStatus.payCountUSDC >
+                        BigInt(0)
+                ) {
+                    const recovered =
+                        await apiPost(
+                            "/api/purchase",
+                            {
+                                action: "game",
+                                walletAddress:
+                                    wallet
+                            }
+                        )
+
+                    if (
+                        recovered.success &&
+                        recovered.result
+                            ?.snapshot
+                    ) {
+                        response = {
+                            ...response,
+                            snapshot:
+                                recovered
+                                    .result
+                                    .snapshot
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error(
+                    "Bootstrap purchase reconciliation failed",
+                    error
+                )
+            }
         }
 
         sendToUnity(
@@ -369,10 +419,24 @@ export default function GameClient() {
                     error
                 )
 
-                sendToUnity(
-                    "OnGamePurchaseStatus",
-                    "Payment completed, but the game could not unlock yet. Please reopen the app."
-                )
+                try {
+                    await bootstrap(wallet)
+
+                    sendToUnity(
+                        "OnGamePurchaseStatus",
+                        "Payment completed. Restoring your game access..."
+                    )
+                } catch (recoveryError) {
+                    console.error(
+                        "Purchase bootstrap recovery failed",
+                        recoveryError
+                    )
+
+                    sendToUnity(
+                        "OnGamePurchaseStatus",
+                        "Payment completed, but the game could not unlock yet. Please reopen the app."
+                    )
+                }
             }
         } catch (error: any) {
             const result =

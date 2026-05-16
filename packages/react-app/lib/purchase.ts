@@ -398,12 +398,84 @@ const PAYMENT_CONFIG_ABI = [
                 type: "bool"
             }
         ]
+    },
+    {
+        name: "secondsUntilCanPay",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            {
+                name: "player",
+                type: "address"
+            }
+        ],
+        outputs: [
+            {
+                type: "uint256"
+            }
+        ]
+    },
+    {
+        name: "getPayCount",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            {
+                name: "player",
+                type: "address"
+            }
+        ],
+        outputs: [
+            {
+                type: "uint256"
+            }
+        ]
+    },
+    {
+        name: "getPayCountUSDT",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            {
+                name: "player",
+                type: "address"
+            }
+        ],
+        outputs: [
+            {
+                type: "uint256"
+            }
+        ]
+    },
+    {
+        name: "getPayCountUSDC",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            {
+                name: "player",
+                type: "address"
+            }
+        ],
+        outputs: [
+            {
+                type: "uint256"
+            }
+        ]
     }
 ]
 
 type PaymentConfig = {
     fee: bigint
     tokenContract: Address
+}
+
+export type EntryPaymentStatus = {
+    canPay: boolean
+    secondsUntilCanPay: bigint
+    payCount: bigint
+    payCountUSDT: bigint
+    payCountUSDC: bigint
 }
 
 function flattenErrorParts(
@@ -681,6 +753,88 @@ async function getPaymentConfig(
     return {
         fee,
         tokenContract
+    }
+}
+
+export async function getEntryPaymentStatus(
+    wallet: Address
+): Promise<EntryPaymentStatus> {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    async function readUint(
+        functionName:
+            | "secondsUntilCanPay"
+            | "getPayCount"
+            | "getPayCountUSDT"
+            | "getPayCountUSDC"
+    ) {
+        const result =
+            await ethereum.request({
+                method: "eth_call",
+                params: [
+                    {
+                        to: GAME_CONTRACT,
+                        data: encodeFunctionData(
+                            {
+                                abi: PAYMENT_CONFIG_ABI,
+                                functionName,
+                                args: [wallet]
+                            }
+                        )
+                    },
+                    "latest"
+                ]
+            })
+
+        return BigInt(
+            result as string
+        )
+    }
+
+    const canPayResult =
+        await ethereum.request({
+            method: "eth_call",
+            params: [
+                {
+                    to: GAME_CONTRACT,
+                    data: encodeFunctionData(
+                        {
+                            abi: PAYMENT_CONFIG_ABI,
+                            functionName:
+                                "canPay",
+                            args: [wallet]
+                        }
+                    )
+                },
+                "latest"
+            ]
+        })
+
+    return {
+        canPay:
+            BigInt(
+                canPayResult as string
+            ) !== BigInt(0),
+        secondsUntilCanPay:
+            await readUint(
+                "secondsUntilCanPay"
+            ),
+        payCount:
+            await readUint(
+                "getPayCount"
+            ),
+        payCountUSDT:
+            await readUint(
+                "getPayCountUSDT"
+            ),
+        payCountUSDC:
+            await readUint(
+                "getPayCountUSDC"
+            )
     }
 }
 
