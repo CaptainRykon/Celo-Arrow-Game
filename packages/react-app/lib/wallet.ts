@@ -7,9 +7,43 @@ declare global {
     }
 }
 
+function normalizeChainId(
+    chainId: unknown
+) {
+    if (
+        typeof chainId !== "string" &&
+        typeof chainId !== "number"
+    ) {
+        return ""
+    }
+
+    return String(chainId)
+        .trim()
+        .toLowerCase()
+}
+
+function tryGetFrameEthereum(
+    target: Window | null | undefined
+) {
+    if (!target)
+        return null
+
+    try {
+        return (target as any).ethereum || null
+    } catch {
+        return null
+    }
+}
+
 export function getEthereum() {
-    if (typeof window === "undefined") return null
-    return window.ethereum
+    if (typeof window === "undefined")
+        return null
+
+    return (
+        tryGetFrameEthereum(window) ||
+        tryGetFrameEthereum(window.parent) ||
+        tryGetFrameEthereum(window.top)
+    )
 }
 
 export async function getWallet(): Promise<Address> {
@@ -19,9 +53,17 @@ export async function getWallet(): Promise<Address> {
         throw new Error("MiniPay wallet not found")
     }
 
-    const accounts = await ethereum.request({
-        method: "eth_requestAccounts"
-    })
+    let accounts =
+        await ethereum.request({
+            method: "eth_accounts"
+        })
+
+    if (!accounts || accounts.length === 0) {
+        accounts =
+            await ethereum.request({
+                method: "eth_requestAccounts"
+            })
+    }
 
     if (!accounts || accounts.length === 0) {
         throw new Error("No wallet connected")
@@ -64,8 +106,13 @@ export async function getChainId(): Promise<string> {
 
 export async function ensureCeloNetwork() {
     const chainId = await getChainId()
+    const normalized =
+        normalizeChainId(chainId)
 
-    if (chainId !== "0xa4ec") {
+    if (
+        normalized !== "0xa4ec" &&
+        normalized !== "42220"
+    ) {
         throw new Error("Wrong network")
     }
 }

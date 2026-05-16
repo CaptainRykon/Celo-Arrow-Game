@@ -228,6 +228,49 @@ export default function GameClient() {
         )
     }
 
+    function getPaymentFailureKind(
+        error: unknown
+    ) {
+        const message =
+            error instanceof Error
+                ? error.message
+                : String(
+                    error ||
+                    "Payment failed"
+                )
+
+        const lower =
+            message.toLowerCase()
+
+        if (
+            lower.includes("cancel") ||
+            lower.includes("rejected") ||
+            lower.includes("denied") ||
+            lower.includes("insufficient")
+        ) {
+            return {
+                message,
+                shouldShowFailedPanel: true
+            }
+        }
+
+        if (
+            lower.includes("transaction timeout") ||
+            lower.includes("execution reverted") ||
+            lower.includes("transaction failed")
+        ) {
+            return {
+                message,
+                shouldShowFailedPanel: true
+            }
+        }
+
+        return {
+            message,
+            shouldShowFailedPanel: false
+        }
+    }
+
     async function handleBootstrap() {
 
         const wallet =
@@ -287,7 +330,6 @@ export default function GameClient() {
     async function handlePurchaseGame(
         payload: any
     ) {
-
         try {
             const wallet =
                 await runMiniPayPayment(
@@ -295,40 +337,62 @@ export default function GameClient() {
                     "USDT"
                 )
 
-            const response =
-                await apiPost(
-                    "/api/purchase",
-                    {
-                        action: "game",
-                        walletAddress:
-                            wallet,
+            try {
+                const response =
+                    await apiPost(
+                        "/api/purchase",
+                        {
+                            action: "game",
+                            walletAddress:
+                                wallet,
 
-                        token:
-                            payload?.token ||
-                            "USDT"
-                    }
+                            token:
+                                payload?.token ||
+                                "USDT"
+                        }
+                    )
+
+                if (!response.success) {
+                    throw new Error(
+                        response.error
+                    )
+                }
+
+                sendToUnity(
+                    "OnGamePurchaseSuccess",
+                    response.result
+                        ?.snapshot || ""
+                )
+            } catch (error: any) {
+                console.error(
+                    "Purchase sync failed",
+                    error
                 )
 
-            if (!response.success) {
-
-                throw new Error(
-                    response.error
+                sendToUnity(
+                    "OnGamePurchaseStatus",
+                    "Payment completed, but the game could not unlock yet. Please reopen the app."
                 )
             }
-
-            sendToUnity(
-                "OnGamePurchaseSuccess",
-                response.result
-                    ?.snapshot || ""
-            )
-
         } catch (error: any) {
+            const result =
+                getPaymentFailureKind(
+                    error
+                )
 
-            sendToUnity(
-                "OnGamePurchaseFailed",
-                error?.message ||
-                "Purchase failed"
-            )
+            if (
+                result.shouldShowFailedPanel
+            ) {
+                sendToUnity(
+                    "OnGamePurchaseFailed",
+                    result.message
+                )
+            } else {
+                sendToUnity(
+                    "OnGamePurchaseStatus",
+                    result.message
+                )
+            }
         }
     }
 

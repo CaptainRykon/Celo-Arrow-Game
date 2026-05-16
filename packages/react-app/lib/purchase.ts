@@ -38,10 +38,21 @@ const DEFAULT_UNIVERSAL: UniversalProgress = {
     weeklyChallengeEndUnixMilliseconds: 0
 }
 
+const FREE_UNLOCK_HINT_REWARD = 5
+const APPROVAL_AMOUNT =
+    BigInt("999999999")
+
 function normalizeWalletAddress(
     walletAddress: string
 ) {
     return walletAddress.trim()
+}
+
+function getApprovalCacheKey(
+    wallet: Address,
+    token: PaymentToken
+) {
+    return `minipay_approved_${wallet.toLowerCase()}_${token.toLowerCase()}`
 }
 
 function buildDefaultUserSnapshot(
@@ -323,7 +334,10 @@ async function waitForTransaction(
         throw new Error("Wallet missing")
     }
 
-    while (true) {
+    let attempts = 0
+    const maxAttempts = 30
+
+    while (attempts < maxAttempts) {
         const receipt =
             await ethereum.request({
                 method:
@@ -339,17 +353,117 @@ async function waitForTransaction(
         await new Promise((r) =>
             setTimeout(r, 2000)
         )
+
+        attempts++
     }
+
+    throw new Error(
+        "Transaction timeout"
+    )
+}
+
+async function hasEnoughAllowance(
+    wallet: Address,
+    spender: Address,
+    amount: bigint
+) {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    const allowanceAbi = [
+        {
+            name: "allowance",
+            type: "function",
+            stateMutability: "view",
+            inputs: [
+                {
+                    name: "owner",
+                    type: "address"
+                },
+                {
+                    name: "spender",
+                    type: "address"
+                }
+            ],
+            outputs: [
+                {
+                    type: "uint256"
+                }
+            ]
+        }
+    ]
+
+    const data =
+        encodeFunctionData({
+            abi: allowanceAbi,
+            functionName:
+                "allowance",
+            args: [
+                wallet,
+                spender
+            ]
+        })
+
+    const result =
+        await ethereum.request({
+            method: "eth_call",
+            params: [
+                {
+                    to: USDT_CONTRACT,
+                    data
+                },
+                "latest"
+            ]
+        })
+
+    return BigInt(result as string) >= amount
 }
 
 async function approveIfNeeded(
     wallet: Address,
-    cacheKey: string
+    token: PaymentToken
 ) {
+    const cacheKey =
+        getApprovalCacheKey(
+            wallet,
+            token
+        )
+
     const approved =
         localStorage.getItem(cacheKey)
 
     if (approved === "true") {
+        const stillApproved =
+            await hasEnoughAllowance(
+                wallet,
+                GAME_CONTRACT as Address,
+                APPROVAL_AMOUNT
+            )
+
+        if (stillApproved) {
+            return
+        }
+
+        localStorage.removeItem(
+            cacheKey
+        )
+    }
+
+    const allowanceApproved =
+        await hasEnoughAllowance(
+            wallet,
+            GAME_CONTRACT as Address,
+            APPROVAL_AMOUNT
+        )
+
+    if (allowanceApproved) {
+        localStorage.setItem(
+            cacheKey,
+            "true"
+        )
         return
     }
 
@@ -365,7 +479,7 @@ async function approveIfNeeded(
             functionName: "approve",
             args: [
                 GAME_CONTRACT,
-                BigInt("999999999")
+                APPROVAL_AMOUNT
             ]
         })
 
@@ -434,13 +548,31 @@ async function sendPayment(
     token: PaymentToken
 ) {
     try {
+        console.log(
+            "[MiniPay] Purchase requested",
+            token
+        )
+
         const wallet = await getWallet()
+
+        console.log(
+            "[MiniPay] Wallet ready",
+            wallet
+        )
 
         await ensureCeloNetwork()
 
+        console.log(
+            "[MiniPay] Network confirmed"
+        )
+
         await approveIfNeeded(
             wallet,
-            "minipay_approved"
+            token
+        )
+
+        console.log(
+            "[MiniPay] Approval confirmed"
         )
 
         const ethereum = getEthereum()
@@ -461,6 +593,10 @@ async function sendPayment(
                 args: []
             })
 
+        console.log(
+            "[MiniPay] Opening payment popup"
+        )
+
         const tx =
             await ethereum.request({
                 method: "eth_sendTransaction",
@@ -474,6 +610,11 @@ async function sendPayment(
             })
 
         await waitForTransaction(tx)
+
+        console.log(
+            "[MiniPay] Payment confirmed",
+            tx
+        )
 
         return wallet
     } catch (error) {
@@ -504,7 +645,11 @@ export async function completeGamePurchase(
 
     const snapshot = {
         ...user,
-        hasPurchasedGame: true
+        hasPurchasedGame: true,
+        hints:
+            user.hasPurchasedGame
+                ? user.hints
+                : user.hints + FREE_UNLOCK_HINT_REWARD
     }
 
     await update(
