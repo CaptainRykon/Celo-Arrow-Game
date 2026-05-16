@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import {
     useEffect,
@@ -30,25 +30,17 @@ declare global {
 }
 
 export default function GameClient() {
-
     const initialized =
         useRef(false)
 
-    // =========================================================
-    // INITIALIZE
-    // =========================================================
-
     useEffect(() => {
-
         if (initialized.current)
             return
 
         initialized.current = true
 
         async function preload() {
-
             try {
-
                 const wallet =
                     await getWalletSafe()
 
@@ -61,9 +53,7 @@ export default function GameClient() {
                 }
 
                 await bootstrap(wallet)
-
             } catch (error) {
-
                 console.error(
                     "Preload failed",
                     error
@@ -76,101 +66,55 @@ export default function GameClient() {
         async function handleMessage(
             event: MessageEvent
         ) {
-
             const data = event.data
 
             if (!data)
                 return
 
             try {
-
                 switch (data.type) {
-
-                    // =========================================================
-                    // BOOTSTRAP
-                    // =========================================================
-
                     case "MINIPAY_BOOTSTRAP":
-
                         await handleBootstrap()
-
                         break
 
-                    // =========================================================
-                    // SYNC USER STATE
-                    // =========================================================
-
                     case "MINIPAY_SYNC_USER_STATE":
-
                         await handleSync(
                             data.payload
                         )
-
                         break
 
-                    // =========================================================
-                    // PURCHASE GAME
-                    // =========================================================
-
                     case "MINIPAY_PURCHASE_GAME":
-
                         await handlePurchaseGame(
                             data.payload
                         )
-
                         break
 
-                    // =========================================================
-                    // BUY HINTS
-                    // =========================================================
-
                     case "MINIPAY_BUY_HINTS":
-
                         await handleBuyHints(
                             data.payload
                         )
-
                         break
 
-                    // =========================================================
-                    // BUY LIVES
-                    // =========================================================
-
+                    case "MINIPAY_BUY_REVIVE":
                     case "MINIPAY_BUY_LIVES":
-
-                        await handleBuyLives(
+                        await handleBuyRevive(
                             data.payload
                         )
-
                         break
 
-                    // =========================================================
-                    // SUBMIT SCORE
-                    // =========================================================
-
                     case "MINIPAY_SUBMIT_SCORE":
-
                         await handleSubmitScore(
                             data.payload
                         )
-
                         break
 
-                    // =========================================================
-                    // GET LEADERBOARD
-                    // =========================================================
-
                     case "MINIPAY_GET_LEADERBOARD":
-
                         await handleGetLeaderboard(
                             data.payload
                         )
-
                         break
                 }
-
             } catch (error: any) {
-
                 console.error(
                     "GameClient Error",
                     error
@@ -190,18 +134,12 @@ export default function GameClient() {
         )
 
         return () => {
-
             window.removeEventListener(
                 "message",
                 handleMessage
             )
         }
-
     }, [])
-
-    // =========================================================
-    // BOOTSTRAP
-    // =========================================================
 
     async function bootstrap(
         wallet: string
@@ -216,7 +154,6 @@ export default function GameClient() {
             )
 
         if (!response.success) {
-
             throw new Error(
                 response.error
             )
@@ -233,12 +170,9 @@ export default function GameClient() {
                     )
 
                 if (
-                    paymentStatus.payCount >
-                        BigInt(0) ||
-                    paymentStatus.payCountUSDT >
-                        BigInt(0) ||
-                    paymentStatus.payCountUSDC >
-                        BigInt(0)
+                    paymentStatus.payCount > BigInt(0) ||
+                    paymentStatus.payCountUSDT > BigInt(0) ||
+                    paymentStatus.payCountUSDC > BigInt(0)
                 ) {
                     const recovered =
                         await apiPost(
@@ -252,8 +186,7 @@ export default function GameClient() {
 
                     if (
                         recovered.success &&
-                        recovered.result
-                            ?.snapshot
+                        recovered.result?.snapshot
                     ) {
                         response = {
                             ...response,
@@ -296,18 +229,11 @@ export default function GameClient() {
             lower.includes("cancel") ||
             lower.includes("rejected") ||
             lower.includes("denied") ||
-            lower.includes("insufficient")
-        ) {
-            return {
-                message,
-                shouldShowFailedPanel: true
-            }
-        }
-
-        if (
+            lower.includes("insufficient") ||
             lower.includes("transaction timeout") ||
             lower.includes("execution reverted") ||
-            lower.includes("transaction failed")
+            lower.includes("transaction failed") ||
+            lower.includes("rate limit")
         ) {
             return {
                 message,
@@ -322,12 +248,10 @@ export default function GameClient() {
     }
 
     async function handleBootstrap() {
-
         const wallet =
             await getWalletSafe()
 
         if (!wallet) {
-
             sendToUnity(
                 "OnWalletAddressResolved",
                 ""
@@ -344,14 +268,9 @@ export default function GameClient() {
         await bootstrap(wallet)
     }
 
-    // =========================================================
-    // SYNC USER STATE
-    // =========================================================
-
     async function handleSync(
         snapshot: any
     ) {
-
         const response =
             await apiPost(
                 "/api/sync",
@@ -361,7 +280,6 @@ export default function GameClient() {
             )
 
         if (!response.success) {
-
             throw new Error(
                 response.error
             )
@@ -373,10 +291,6 @@ export default function GameClient() {
         )
     }
 
-    // =========================================================
-    // PURCHASE GAME
-    // =========================================================
-
     async function handlePurchaseGame(
         payload: any
     ) {
@@ -384,7 +298,8 @@ export default function GameClient() {
             const wallet =
                 await runMiniPayPayment(
                     payload?.token ||
-                    "USDT"
+                    "USDT",
+                    "entry"
                 )
 
             try {
@@ -393,9 +308,7 @@ export default function GameClient() {
                         "/api/purchase",
                         {
                             action: "game",
-                            walletAddress:
-                                wallet,
-
+                            walletAddress: wallet,
                             token:
                                 payload?.token ||
                                 "USDT"
@@ -410,8 +323,7 @@ export default function GameClient() {
 
                 sendToUnity(
                     "OnGamePurchaseSuccess",
-                    response.result
-                        ?.snapshot || ""
+                    response.result?.snapshot || ""
                 )
             } catch (error: any) {
                 console.error(
@@ -460,19 +372,15 @@ export default function GameClient() {
         }
     }
 
-    // =========================================================
-    // BUY HINTS
-    // =========================================================
-
     async function handleBuyHints(
         payload: any
     ) {
-
         try {
             const wallet =
                 await runMiniPayPayment(
                     payload?.token ||
-                    "USDT"
+                    "USDT",
+                    "hint"
                 )
 
             const response =
@@ -480,12 +388,9 @@ export default function GameClient() {
                     "/api/purchase",
                     {
                         action: "hints",
-                        walletAddress:
-                            wallet,
-
+                        walletAddress: wallet,
                         amount:
-                            payload?.amount || 1,
-
+                            payload?.amount || 5,
                         token:
                             payload?.token ||
                             "USDT"
@@ -493,7 +398,6 @@ export default function GameClient() {
                 )
 
             if (!response.success) {
-
                 throw new Error(
                     response.error
                 )
@@ -501,12 +405,9 @@ export default function GameClient() {
 
             sendToUnity(
                 "OnHintPurchaseSuccess",
-                response.result
-                    ?.snapshot || ""
+                response.result?.snapshot || ""
             )
-
         } catch (error: any) {
-
             sendToUnity(
                 "OnHintPurchaseFailed",
                 error?.message ||
@@ -515,32 +416,23 @@ export default function GameClient() {
         }
     }
 
-    // =========================================================
-    // BUY LIVES
-    // =========================================================
-
-    async function handleBuyLives(
+    async function handleBuyRevive(
         payload: any
     ) {
-
         try {
             const wallet =
                 await runMiniPayPayment(
                     payload?.token ||
-                    "USDT"
+                    "USDT",
+                    "revive"
                 )
 
             const response =
                 await apiPost(
                     "/api/purchase",
                     {
-                        action: "lives",
-                        walletAddress:
-                            wallet,
-
-                        amount:
-                            payload?.amount || 1,
-
+                        action: "revive",
+                        walletAddress: wallet,
                         token:
                             payload?.token ||
                             "USDT"
@@ -548,50 +440,52 @@ export default function GameClient() {
                 )
 
             if (!response.success) {
-
                 throw new Error(
                     response.error
                 )
             }
 
+            const snapshotPayload =
+                response.result?.snapshot || ""
+
+            sendToUnity(
+                "OnRevivePurchaseSuccess",
+                snapshotPayload
+            )
             sendToUnity(
                 "OnLivesPurchaseSuccess",
-                response.result
-                    ?.snapshot || ""
+                snapshotPayload
             )
-
         } catch (error: any) {
+            const message =
+                error?.message ||
+                "Revive purchase failed"
 
             sendToUnity(
+                "OnRevivePurchaseFailed",
+                message
+            )
+            sendToUnity(
                 "OnLivesPurchaseFailed",
-                error?.message ||
-                "Lives purchase failed"
+                message
             )
         }
     }
 
-    // =========================================================
-    // SUBMIT SCORE
-    // =========================================================
-
     async function handleSubmitScore(
         payload: any
     ) {
-
         try {
-
             const response =
                 await apiPost(
                     "/api/leaderboard",
                     {
                         action: "submit",
-
                         ...payload
                     }
                 )
 
             if (!response.success) {
-
                 throw new Error(
                     response.error
                 )
@@ -601,9 +495,7 @@ export default function GameClient() {
                 "OnLeaderboardSubmitted",
                 ""
             )
-
         } catch (error: any) {
-
             sendToUnity(
                 "OnLeaderboardSubmitFailed",
                 error?.message ||
@@ -612,28 +504,20 @@ export default function GameClient() {
         }
     }
 
-    // =========================================================
-    // GET LEADERBOARD
-    // =========================================================
-
     async function handleGetLeaderboard(
         payload: any
     ) {
-
         try {
-
             const response =
                 await apiPost(
                     "/api/leaderboard",
                     {
                         action: "get",
-
                         ...payload
                     }
                 )
 
             if (!response.success) {
-
                 throw new Error(
                     response.error
                 )
@@ -644,14 +528,11 @@ export default function GameClient() {
                 JSON.stringify({
                     entries:
                         response.entries,
-
                     playerRank:
                         response.playerRank
                 })
             )
-
         } catch (error: any) {
-
             sendToUnity(
                 "OnLeaderboardFailed",
                 error?.message ||
@@ -659,8 +540,6 @@ export default function GameClient() {
             )
         }
     }
-
-
 
     return (
         <div

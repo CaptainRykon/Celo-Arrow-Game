@@ -1,8 +1,6 @@
 import "server-only"
 
-import type {
-    Address
-} from "viem"
+import type { Address } from "viem"
 
 import type {
     UniversalProgress,
@@ -12,7 +10,6 @@ import type {
 import {
     readDb,
     writeDb,
-    patchDb,
     deleteDb
 } from "./firebase-server"
 
@@ -37,8 +34,6 @@ export function buildDefaultUserSnapshot(
         walletAddress,
         username: "Player",
         hasPurchasedGame: false,
-        revives: 3,
-        lives: 3,
         hints: 0,
         tutorialCompleted: false,
         classic: {
@@ -46,8 +41,7 @@ export function buildDefaultUserSnapshot(
         },
         challenge: {
             chances: 1,
-            lastResetUnixMilliseconds:
-                Date.now(),
+            lastResetUnixMilliseconds: Date.now(),
             streakCycleIndex: 0,
             streakMask: 0,
             bestTimeSeconds: -1
@@ -60,24 +54,13 @@ export function buildStoredUserRecord(
     snapshot: UserSnapshot
 ) {
     return {
-        walletAddress:
-            snapshot.walletAddress,
-        username:
-            snapshot.username,
-        hasPurchasedGame:
-            snapshot.hasPurchasedGame,
-        revives:
-            snapshot.revives,
-        lives:
-            snapshot.revives,
-        hints:
-            snapshot.hints,
-        tutorialCompleted:
-            snapshot.tutorialCompleted,
-        classic:
-            snapshot.classic,
-        challenge:
-            snapshot.challenge
+        walletAddress: snapshot.walletAddress,
+        username: snapshot.username,
+        hasPurchasedGame: snapshot.hasPurchasedGame,
+        hints: snapshot.hints,
+        tutorialCompleted: snapshot.tutorialCompleted,
+        classic: snapshot.classic,
+        challenge: snapshot.challenge
     }
 }
 
@@ -92,16 +75,6 @@ export function mergeSnapshot(
             universal
         )
 
-    const revives =
-        Math.max(
-            0,
-            Number(
-                raw?.revives ??
-                raw?.lives ??
-                base.revives
-            )
-        )
-
     return {
         walletAddress,
         username:
@@ -111,8 +84,6 @@ export function mergeSnapshot(
                 : base.username,
         hasPurchasedGame:
             !!raw?.hasPurchasedGame,
-        revives,
-        lives: revives,
         hints:
             Math.max(
                 0,
@@ -239,13 +210,20 @@ export async function getOrCreateUserSnapshot(
             universal
         )
 
-    await writeDb(
-        `users/${normalizedWallet}`,
-        buildStoredUserRecord(user)
-    )
-    await deleteDb(
-        `users/${normalizedWallet}/universal`
-    )
+    const hasLegacyFields =
+        Object.prototype.hasOwnProperty.call(rawUser, "revives") ||
+        Object.prototype.hasOwnProperty.call(rawUser, "lives") ||
+        Object.prototype.hasOwnProperty.call(rawUser, "universal")
+
+    if (hasLegacyFields) {
+        await writeDb(
+            `users/${normalizedWallet}`,
+            buildStoredUserRecord(user)
+        )
+        await deleteDb(
+            `users/${normalizedWallet}/universal`
+        )
+    }
 
     return user
 }
@@ -253,65 +231,60 @@ export async function getOrCreateUserSnapshot(
 export function sanitizeSnapshot(
     snapshot: UserSnapshot
 ): UserSnapshot {
-    const revives =
-        Math.max(
-            0,
-            snapshot.revives ??
-            snapshot.lives ??
-            0
-        )
-
     return {
         walletAddress:
             snapshot.walletAddress || "",
         username:
-            snapshot.username || "Guest",
+            snapshot.username || "Player",
         hasPurchasedGame:
             !!snapshot.hasPurchasedGame,
-        revives,
-        lives: revives,
         hints:
             Math.max(
                 0,
-                snapshot.hints || 0
+                Number(snapshot.hints || 0)
             ),
         tutorialCompleted:
             !!snapshot.tutorialCompleted,
         classic: {
             level: Math.max(
                 1,
-                snapshot.classic?.level || 1
+                Number(snapshot.classic?.level || 1)
             )
         },
         challenge: {
             chances: Math.max(
                 0,
-                snapshot.challenge
-                    ?.chances || 0
+                Number(snapshot.challenge?.chances || 0)
             ),
             lastResetUnixMilliseconds:
-                snapshot.challenge
-                    ?.lastResetUnixMilliseconds ||
-                Date.now(),
+                Number(
+                    snapshot.challenge?.lastResetUnixMilliseconds ||
+                    Date.now()
+                ),
             streakCycleIndex:
-                snapshot.challenge
-                    ?.streakCycleIndex || 0,
+                Number(
+                    snapshot.challenge?.streakCycleIndex || 0
+                ),
             streakMask:
-                snapshot.challenge
-                    ?.streakMask || 0,
+                Math.max(
+                    0,
+                    Number(snapshot.challenge?.streakMask || 0)
+                ),
             bestTimeSeconds:
-                snapshot.challenge
-                    ?.bestTimeSeconds || -1
+                Number(
+                    snapshot.challenge?.bestTimeSeconds || -1
+                )
         },
         universal: {
             weeklyChallengeCycleIndex:
-                snapshot.universal
-                    ?.weeklyChallengeCycleIndex ||
-                0,
+                Number(
+                    snapshot.universal?.weeklyChallengeCycleIndex || 0
+                ),
             weeklyChallengeEndUnixMilliseconds:
-                snapshot.universal
-                    ?.weeklyChallengeEndUnixMilliseconds ||
-                Date.now()
+                Number(
+                    snapshot.universal?.weeklyChallengeEndUnixMilliseconds ||
+                    0
+                )
         }
     }
 }
@@ -319,53 +292,9 @@ export function sanitizeSnapshot(
 export async function bootstrapUserSnapshot(
     walletAddress: string
 ) {
-    const wallet =
-        normalizeWalletAddress(
-            walletAddress
-        )
-
-    const universal =
-        await getUniversalSnapshot()
-
-    const rawUser =
-        await readDb<any>(
-            `users/${wallet}`
-        )
-
-    if (!rawUser) {
-        const newUser =
-            buildDefaultUserSnapshot(
-                wallet,
-                universal
-            )
-
-        await writeDb(
-            `users/${wallet}`,
-            buildStoredUserRecord(newUser)
-        )
-        await deleteDb(
-            `users/${wallet}/universal`
-        )
-
-        return newUser
-    }
-
-    const existingUser =
-        mergeSnapshot(
-            wallet,
-            rawUser,
-            universal
-        )
-
-    await writeDb(
-        `users/${wallet}`,
-        buildStoredUserRecord(existingUser)
+    return await getOrCreateUserSnapshot(
+        walletAddress as Address
     )
-    await deleteDb(
-        `users/${wallet}/universal`
-    )
-
-    return existingUser
 }
 
 export async function syncUserSnapshot(
@@ -374,19 +303,23 @@ export async function syncUserSnapshot(
     const cleanSnapshot =
         sanitizeSnapshot(snapshot)
 
+    const universal =
+        await getUniversalSnapshot()
+
+    const mergedSnapshot = {
+        ...cleanSnapshot,
+        universal
+    }
+
     await writeDb(
-        `users/${cleanSnapshot.walletAddress}`,
-        buildStoredUserRecord(cleanSnapshot)
+        `users/${mergedSnapshot.walletAddress}`,
+        buildStoredUserRecord(mergedSnapshot)
     )
     await deleteDb(
-        `users/${cleanSnapshot.walletAddress}/universal`
-    )
-    await patchDb(
-        "universal/currentChallenge",
-        cleanSnapshot.universal
+        `users/${mergedSnapshot.walletAddress}/universal`
     )
 
-    return cleanSnapshot
+    return mergedSnapshot
 }
 
 export async function completeGamePurchase(
@@ -462,35 +395,12 @@ export async function completeHintPurchase(
 }
 
 export async function completeRevivePurchase(
-    walletAddress: string,
-    amount: number
+    walletAddress: string
 ) {
-    const user =
+    const snapshot =
         await getOrCreateUserSnapshot(
             walletAddress as Address
         )
-
-    const wallet =
-        normalizeWalletAddress(
-            walletAddress
-        )
-
-    const revives =
-        user.revives + Math.max(0, amount)
-
-    const snapshot = {
-        ...user,
-        revives,
-        lives: revives
-    }
-
-    await writeDb(
-        `users/${wallet}`,
-        buildStoredUserRecord(snapshot)
-    )
-    await deleteDb(
-        `users/${wallet}/universal`
-    )
 
     return {
         success: true,

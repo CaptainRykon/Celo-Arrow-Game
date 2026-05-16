@@ -19,11 +19,8 @@ export interface UserSnapshot {
     walletAddress: string
     username: string
     hasPurchasedGame: boolean
-    revives: number
-    lives?: number
     hints: number
     tutorialCompleted: boolean
-
     classic: ClassicProgress
     challenge: ChallengeProgress
     universal: UniversalProgress

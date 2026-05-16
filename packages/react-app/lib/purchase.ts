@@ -10,29 +10,45 @@ import {
     getEthereum
 } from "./wallet"
 
-import {
-    ref,
-    update,
-    get,
-    set,
-    remove
-} from "firebase/database"
-
-import { getDb } from "./firebase"
-import type {
-    UniversalProgress,
-    UserSnapshot
-} from "./types"
-
 export type PaymentToken =
     | "USDT"
     | "USDC"
-const GAME_CONTRACT: Address =
-    (
+
+export type PurchaseKind =
+    | "entry"
+    | "hint"
+    | "revive"
+
+export interface EntryPaymentStatus {
+    canPay: boolean
+    payCount: bigint
+    payCountUSDT: bigint
+    payCountUSDC: bigint
+}
+
+interface PaymentConfig {
+    contractAddress: Address
+    tokenContract: Address
+    fee: bigint
+}
+
+const CONTRACTS: Record<PurchaseKind, Address> = {
+    entry: (
         process.env
             .NEXT_PUBLIC_GAME_ENTRY_CONTRACT ||
-        "0x927864875719A2357ADf3be81df7ccA1779dCAE6"
+        "0x0CCba85476Fbd345fd3aD672004DA27083727151"
+    ) as Address,
+    hint: (
+        process.env
+            .NEXT_PUBLIC_HINT_PURCHASE_CONTRACT ||
+        "0x69c9faF5C9b3A9227c2e1E5312a261103b99933F"
+    ) as Address,
+    revive: (
+        process.env
+            .NEXT_PUBLIC_REVIVE_PURCHASE_CONTRACT ||
+        "0x2dEf5F5EFC3d44822DDA3dD24D1DEAdEC311Bd8a"
     ) as Address
+}
 
 const FALLBACK_USDT_CONTRACT: Address =
     (
@@ -48,261 +64,8 @@ const FALLBACK_USDC_CONTRACT: Address =
         "0x37f750B7cC259a2f741Af45294f6a16572CF5cAd"
     ) as Address
 
-const DEFAULT_UNIVERSAL: UniversalProgress = {
-    weeklyChallengeCycleIndex: 0,
-    weeklyChallengeEndUnixMilliseconds: 0
-}
-
-const FREE_UNLOCK_HINT_REWARD = 5
 const APPROVAL_AMOUNT =
     BigInt("1000000")
-
-function normalizeWalletAddress(
-    walletAddress: string
-) {
-    return walletAddress.trim()
-}
-
-function getApprovalCacheKey(
-    wallet: Address,
-    token: PaymentToken,
-    tokenContract: Address
-) {
-    return `minipay_approved_${wallet.toLowerCase()}_${token.toLowerCase()}_${tokenContract.toLowerCase()}`
-}
-
-function buildDefaultUserSnapshot(
-    walletAddress: string,
-    universal: UniversalProgress = DEFAULT_UNIVERSAL
-): UserSnapshot {
-    return {
-        walletAddress,
-        username: "Player",
-        hasPurchasedGame: false,
-        revives: 3,
-        lives: 3,
-        hints: 0,
-        tutorialCompleted: false,
-        classic: {
-            level: 1
-        },
-        challenge: {
-            chances: 1,
-            lastResetUnixMilliseconds:
-                Date.now(),
-            streakCycleIndex: 0,
-            streakMask: 0,
-            bestTimeSeconds: -1
-        },
-        universal
-    }
-}
-
-function buildStoredUserRecord(
-    snapshot: UserSnapshot
-) {
-    return {
-        walletAddress:
-            snapshot.walletAddress,
-        username:
-            snapshot.username,
-        hasPurchasedGame:
-            snapshot.hasPurchasedGame,
-        revives:
-            snapshot.revives,
-        lives:
-            snapshot.revives,
-        hints:
-            snapshot.hints,
-        tutorialCompleted:
-            snapshot.tutorialCompleted,
-        classic:
-            snapshot.classic,
-        challenge:
-            snapshot.challenge
-    }
-}
-
-function mergeSnapshot(
-    walletAddress: string,
-    raw: any,
-    universal: UniversalProgress
-): UserSnapshot {
-    const base =
-        buildDefaultUserSnapshot(
-            walletAddress,
-            universal
-        )
-
-    const revives =
-        Math.max(
-            0,
-            Number(
-                raw?.revives ??
-                raw?.lives ??
-                base.revives
-            )
-        )
-
-    return {
-        walletAddress,
-        username:
-            typeof raw?.username === "string" &&
-            raw.username.trim()
-                ? raw.username.trim()
-                : base.username,
-        hasPurchasedGame:
-            !!raw?.hasPurchasedGame,
-        revives,
-        lives: revives,
-        hints:
-            Math.max(
-                0,
-                Number(
-                    raw?.hints ??
-                    base.hints
-                )
-            ),
-        tutorialCompleted:
-            !!raw?.tutorialCompleted,
-        classic: {
-            level:
-                Math.max(
-                    1,
-                    Number(
-                        raw?.classic?.level ??
-                        base.classic.level
-                    )
-                )
-        },
-        challenge: {
-            chances:
-                Math.max(
-                    0,
-                    Number(
-                        raw?.challenge?.chances ??
-                        base.challenge.chances
-                    )
-                ),
-            lastResetUnixMilliseconds:
-                Number(
-                    raw?.challenge?.lastResetUnixMilliseconds ??
-                    base.challenge.lastResetUnixMilliseconds
-                ),
-            streakCycleIndex:
-                Number(
-                    raw?.challenge?.streakCycleIndex ??
-                    base.challenge.streakCycleIndex
-                ),
-            streakMask:
-                Math.max(
-                    0,
-                    Number(
-                        raw?.challenge?.streakMask ??
-                        base.challenge.streakMask
-                    )
-                ),
-            bestTimeSeconds:
-                Number(
-                    raw?.challenge?.bestTimeSeconds ??
-                    base.challenge.bestTimeSeconds
-                )
-        },
-        universal
-    }
-}
-
-async function getUniversalSnapshot() {
-    const universalRef =
-        ref(
-            getDb(),
-            "universal/currentChallenge"
-        )
-
-    const snapshot =
-        await get(universalRef)
-
-    if (!snapshot.exists()) {
-        await set(
-            universalRef,
-            DEFAULT_UNIVERSAL
-        )
-
-        return DEFAULT_UNIVERSAL
-    }
-
-    return {
-        weeklyChallengeCycleIndex:
-            Number(
-                snapshot.val()?.weeklyChallengeCycleIndex ??
-                DEFAULT_UNIVERSAL.weeklyChallengeCycleIndex
-            ),
-        weeklyChallengeEndUnixMilliseconds:
-            Number(
-                snapshot.val()?.weeklyChallengeEndUnixMilliseconds ??
-                DEFAULT_UNIVERSAL.weeklyChallengeEndUnixMilliseconds
-            )
-    }
-}
-
-async function getOrCreateUserSnapshot(
-    wallet: Address
-) {
-    const normalizedWallet =
-        normalizeWalletAddress(wallet)
-
-    const universal =
-        await getUniversalSnapshot()
-
-    const userRef =
-        ref(
-            getDb(),
-            `users/${normalizedWallet}`
-        )
-
-    const snapshot =
-        await get(userRef)
-
-    if (!snapshot.exists()) {
-        const user =
-            buildDefaultUserSnapshot(
-                normalizedWallet,
-                universal
-            )
-
-        await set(
-            userRef,
-            buildStoredUserRecord(user)
-        )
-        await remove(
-            ref(
-                getDb(),
-                `users/${normalizedWallet}/universal`
-            )
-        )
-        return user
-    }
-
-    const user =
-        mergeSnapshot(
-            normalizedWallet,
-            snapshot.val(),
-            universal
-        )
-
-    await set(
-        userRef,
-        buildStoredUserRecord(user)
-    )
-    await remove(
-        ref(
-            getDb(),
-            `users/${normalizedWallet}/universal`
-        )
-    )
-
-    return user
-}
 
 const ERC20_ABI = [
     {
@@ -315,23 +78,55 @@ const ERC20_ABI = [
                 type: "address"
             },
             {
-                name: "amount",
+                name: "value",
                 type: "uint256"
             }
         ],
-        outputs: []
+        outputs: [
+            {
+                type: "bool"
+            }
+        ]
+    },
+    {
+        name: "allowance",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            {
+                name: "owner",
+                type: "address"
+            },
+            {
+                name: "spender",
+                type: "address"
+            }
+        ],
+        outputs: [
+            {
+                type: "uint256"
+            }
+        ]
+    },
+    {
+        name: "balanceOf",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            {
+                name: "account",
+                type: "address"
+            }
+        ],
+        outputs: [
+            {
+                type: "uint256"
+            }
+        ]
     }
-]
+] as const
 
 const PAYMENT_ABI = [
-    {
-        name: "pay",
-        type: "function",
-        stateMutability: "nonpayable",
-        inputs: [],
-        outputs: []
-    },
-
     {
         name: "payWithUSDT",
         type: "function",
@@ -339,7 +134,6 @@ const PAYMENT_ABI = [
         inputs: [],
         outputs: []
     },
-
     {
         name: "payWithUSDC",
         type: "function",
@@ -347,7 +141,7 @@ const PAYMENT_ABI = [
         inputs: [],
         outputs: []
     }
-]
+] as const
 
 const PAYMENT_CONFIG_ABI = [
     {
@@ -382,39 +176,10 @@ const PAYMENT_CONFIG_ABI = [
                 type: "uint256"
             }
         ]
-    },
-    {
-        name: "canPay",
-        type: "function",
-        stateMutability: "view",
-        inputs: [
-            {
-                name: "user",
-                type: "address"
-            }
-        ],
-        outputs: [
-            {
-                type: "bool"
-            }
-        ]
-    },
-    {
-        name: "secondsUntilCanPay",
-        type: "function",
-        stateMutability: "view",
-        inputs: [
-            {
-                name: "player",
-                type: "address"
-            }
-        ],
-        outputs: [
-            {
-                type: "uint256"
-            }
-        ]
-    },
+    }
+] as const
+
+const ENTRY_STATUS_ABI = [
     {
         name: "getPayCount",
         type: "function",
@@ -463,19 +228,21 @@ const PAYMENT_CONFIG_ABI = [
             }
         ]
     }
-]
+] as const
 
-type PaymentConfig = {
-    fee: bigint
-    tokenContract: Address
+function getContractAddress(
+    kind: PurchaseKind
+) {
+    return CONTRACTS[kind]
 }
 
-export type EntryPaymentStatus = {
-    canPay: boolean
-    secondsUntilCanPay: bigint
-    payCount: bigint
-    payCountUSDT: bigint
-    payCountUSDC: bigint
+function getApprovalCacheKey(
+    wallet: Address,
+    token: PaymentToken,
+    tokenContract: Address,
+    spenderContract: Address
+) {
+    return `minipay_approved_${wallet.toLowerCase()}_${token.toLowerCase()}_${tokenContract.toLowerCase()}_${spenderContract.toLowerCase()}`
 }
 
 function flattenErrorParts(
@@ -491,80 +258,44 @@ function flattenErrorParts(
         return
     }
 
-    if (
-        typeof error === "string" ||
-        typeof error === "number" ||
-        typeof error === "boolean"
-    ) {
-        const value =
-            String(error).trim()
+    visited.add(error)
 
-        if (
-            value &&
-            !parts.includes(value)
-        ) {
-            parts.push(value)
-        }
-
+    if (typeof error === "string") {
+        const trimmed = error.trim()
+        if (trimmed && !parts.includes(trimmed))
+            parts.push(trimmed)
         return
     }
 
     if (error instanceof Error) {
-        visited.add(error)
+        if (error.message && !parts.includes(error.message))
+            parts.push(error.message)
+
         flattenErrorParts(
-            error.message,
+            (error as any).cause,
             parts,
             visited
         )
-
-        const extraError =
-            error as Error & {
-                cause?: unknown
-            }
-
-        if (
-            extraError.cause !== undefined
-        ) {
-            flattenErrorParts(
-                extraError.cause,
-                parts,
-                visited
-            )
-        }
-
         return
     }
 
     if (typeof error === "object") {
-        visited.add(error)
-
-        const record =
-            error as Record<
-                string,
-                unknown
-            >
-
-        const prioritizedKeys = [
+        const record = error as Record<string, unknown>
+        const keys = [
             "message",
-            "shortMessage",
             "reason",
+            "shortMessage",
             "details",
-            "error",
-            "data",
-            "cause"
+            "error"
         ]
 
-        for (const key of prioritizedKeys) {
-            if (
-                key in record &&
-                record[key] !== undefined
-            ) {
+        for (const key of keys) {
+            if (key in record)
                 flattenErrorParts(
                     record[key],
                     parts,
                     visited
                 )
-            }
         }
 
         if (
@@ -612,496 +343,6 @@ function extractErrorMessage(
         : "Payment failed"
 }
 
-function shouldFallbackToLegacyPay(
-    error: unknown
-) {
-    const lower =
-        extractErrorMessage(error)
-            .toLowerCase()
-
-    if (
-        lower.includes("cancel") ||
-        lower.includes("rejected") ||
-        lower.includes("denied") ||
-        lower.includes("insufficient")
-    ) {
-        return false
-    }
-
-    return (
-        lower.includes("execution reverted") ||
-        lower.includes("revert") ||
-        lower.includes("selector") ||
-        lower.includes("not recognized") ||
-        lower.includes("method") ||
-        lower.includes("unsupported") ||
-        lower.includes("invalid") ||
-        lower.includes("[object object]") ||
-        lower.includes("code -32603")
-    )
-}
-
-function getPaymentMethodCandidates(
-    token: PaymentToken
-) {
-    return token === "USDC"
-        ? ["payWithUSDC", "pay"] as const
-        : ["payWithUSDT", "pay"] as const
-}
-
-async function getPaymentConfig(
-    token: PaymentToken,
-    wallet: Address
-): Promise<PaymentConfig> {
-    const ethereum = getEthereum()
-
-    if (!ethereum) {
-        throw new Error("Wallet missing")
-    }
-
-    let tokenContract: Address =
-        token === "USDC"
-            ? FALLBACK_USDC_CONTRACT
-            : FALLBACK_USDT_CONTRACT
-
-    let fee = BigInt("500000")
-
-    try {
-        const contractToken =
-            await ethereum.request({
-                method: "eth_call",
-                params: [
-                    {
-                        to: GAME_CONTRACT,
-                        data: encodeFunctionData(
-                            {
-                                abi: PAYMENT_CONFIG_ABI,
-                                functionName:
-                                    token,
-                                args: []
-                            }
-                        )
-                    },
-                    "latest"
-                ]
-            })
-
-        if (
-            typeof contractToken ===
-            "string" &&
-            contractToken.length >= 42
-        ) {
-            tokenContract =
-                (`0x${contractToken.slice(-40)}` as Address)
-        }
-    } catch {
-    }
-
-    try {
-        const feeResult =
-            await ethereum.request({
-                method: "eth_call",
-                params: [
-                    {
-                        to: GAME_CONTRACT,
-                        data: encodeFunctionData(
-                            {
-                                abi: PAYMENT_CONFIG_ABI,
-                                functionName:
-                                    "FEE",
-                                args: []
-                            }
-                        )
-                    },
-                    "latest"
-                ]
-            })
-
-        if (typeof feeResult === "string") {
-            fee = BigInt(feeResult)
-        }
-    } catch {
-    }
-
-    try {
-        const canPayResult =
-            await ethereum.request({
-                method: "eth_call",
-                params: [
-                    {
-                        to: GAME_CONTRACT,
-                        data: encodeFunctionData(
-                            {
-                                abi: PAYMENT_CONFIG_ABI,
-                                functionName:
-                                    "canPay",
-                                args: [wallet]
-                            }
-                        )
-                    },
-                    "latest"
-                ]
-            })
-
-        console.log(
-            "[MiniPay] canPay",
-            canPayResult
-        )
-    } catch {
-    }
-
-    return {
-        fee,
-        tokenContract
-    }
-}
-
-export async function getEntryPaymentStatus(
-    wallet: Address
-): Promise<EntryPaymentStatus> {
-    const ethereum = getEthereum()
-
-    if (!ethereum) {
-        throw new Error("Wallet missing")
-    }
-
-    async function readUint(
-        functionName:
-            | "secondsUntilCanPay"
-            | "getPayCount"
-            | "getPayCountUSDT"
-            | "getPayCountUSDC"
-    ) {
-        const result =
-            await ethereum.request({
-                method: "eth_call",
-                params: [
-                    {
-                        to: GAME_CONTRACT,
-                        data: encodeFunctionData(
-                            {
-                                abi: PAYMENT_CONFIG_ABI,
-                                functionName,
-                                args: [wallet]
-                            }
-                        )
-                    },
-                    "latest"
-                ]
-            })
-
-        return BigInt(
-            result as string
-        )
-    }
-
-    const canPayResult =
-        await ethereum.request({
-            method: "eth_call",
-            params: [
-                {
-                    to: GAME_CONTRACT,
-                    data: encodeFunctionData(
-                        {
-                            abi: PAYMENT_CONFIG_ABI,
-                            functionName:
-                                "canPay",
-                            args: [wallet]
-                        }
-                    )
-                },
-                "latest"
-            ]
-        })
-
-    return {
-        canPay:
-            BigInt(
-                canPayResult as string
-            ) !== BigInt(0),
-        secondsUntilCanPay:
-            await readUint(
-                "secondsUntilCanPay"
-            ),
-        payCount:
-            await readUint(
-                "getPayCount"
-            ),
-        payCountUSDT:
-            await readUint(
-                "getPayCountUSDT"
-            ),
-        payCountUSDC:
-            await readUint(
-                "getPayCountUSDC"
-            )
-    }
-}
-
-async function waitForTransaction(
-    txHash: string
-) {
-    const ethereum = getEthereum()
-
-    if (!ethereum) {
-        throw new Error("Wallet missing")
-    }
-
-    let attempts = 0
-    const maxAttempts = 30
-
-    while (attempts < maxAttempts) {
-        const receipt =
-            await ethereum.request({
-                method:
-                    "eth_getTransactionReceipt",
-
-                params: [txHash]
-            })
-
-        if (receipt) {
-            return receipt
-        }
-
-        await new Promise((r) =>
-            setTimeout(r, 2000)
-        )
-
-        attempts++
-    }
-
-    throw new Error(
-        "Transaction timeout"
-    )
-}
-
-async function hasEnoughAllowance(
-    wallet: Address,
-    spender: Address,
-    amount: bigint,
-    tokenContract: Address
-) {
-    const ethereum = getEthereum()
-
-    if (!ethereum) {
-        throw new Error("Wallet missing")
-    }
-
-    const allowanceAbi = [
-        {
-            name: "allowance",
-            type: "function",
-            stateMutability: "view",
-            inputs: [
-                {
-                    name: "owner",
-                    type: "address"
-                },
-                {
-                    name: "spender",
-                    type: "address"
-                }
-            ],
-            outputs: [
-                {
-                    type: "uint256"
-                }
-            ]
-        }
-    ]
-
-    const data =
-        encodeFunctionData({
-            abi: allowanceAbi,
-            functionName:
-                "allowance",
-            args: [
-                wallet,
-                spender
-            ]
-        })
-
-    const result =
-        await ethereum.request({
-            method: "eth_call",
-            params: [
-                {
-                    to: tokenContract,
-                    data
-                },
-                "latest"
-            ]
-        })
-
-    return BigInt(result as string) >= amount
-}
-
-async function getTokenBalance(
-    wallet: Address,
-    tokenContract: Address
-) {
-    const ethereum = getEthereum()
-
-    if (!ethereum) {
-        throw new Error("Wallet missing")
-    }
-
-    const balanceAbi = [
-        {
-            name: "balanceOf",
-            type: "function",
-            stateMutability: "view",
-            inputs: [
-                {
-                    name: "account",
-                    type: "address"
-                }
-            ],
-            outputs: [
-                {
-                    type: "uint256"
-                }
-            ]
-        }
-    ]
-
-    const data =
-        encodeFunctionData({
-            abi: balanceAbi,
-            functionName:
-                "balanceOf",
-            args: [wallet]
-        })
-
-    const result =
-        await ethereum.request({
-            method: "eth_call",
-            params: [
-                {
-                    to: tokenContract,
-                    data
-                },
-                "latest"
-            ]
-        })
-
-    return BigInt(result as string)
-}
-
-async function getLegacyTokenBalance(
-    wallet: Address,
-    token: PaymentToken,
-    currentTokenContract: Address
-) {
-    const legacyTokenContract =
-        token === "USDC"
-            ? FALLBACK_USDC_CONTRACT
-            : FALLBACK_USDT_CONTRACT
-
-    if (
-        legacyTokenContract
-            .toLowerCase() ===
-        currentTokenContract.toLowerCase()
-    ) {
-        return BigInt(0)
-    }
-
-    try {
-        return await getTokenBalance(
-            wallet,
-            legacyTokenContract
-        )
-    } catch {
-        return BigInt(0)
-    }
-}
-
-async function approveIfNeeded(
-    wallet: Address,
-    token: PaymentToken,
-    tokenContract: Address,
-    requiredPaymentAmount: bigint
-) {
-    const cacheKey =
-        getApprovalCacheKey(
-            wallet,
-            token,
-            tokenContract
-        )
-
-    const approved =
-        localStorage.getItem(cacheKey)
-
-    if (approved === "true") {
-        const stillApproved =
-            await hasEnoughAllowance(
-                wallet,
-                GAME_CONTRACT as Address,
-                requiredPaymentAmount,
-                tokenContract
-            )
-
-        if (stillApproved) {
-            return
-        }
-
-        localStorage.removeItem(
-            cacheKey
-        )
-    }
-
-    const allowanceApproved =
-        await hasEnoughAllowance(
-            wallet,
-            GAME_CONTRACT as Address,
-            requiredPaymentAmount,
-            tokenContract
-        )
-
-    if (allowanceApproved) {
-        localStorage.setItem(
-            cacheKey,
-            "true"
-        )
-        return
-    }
-
-    const ethereum = getEthereum()
-
-    if (!ethereum) {
-        throw new Error("Wallet missing")
-    }
-
-    const approveData =
-        encodeFunctionData({
-            abi: ERC20_ABI,
-            functionName: "approve",
-            args: [
-                GAME_CONTRACT,
-                APPROVAL_AMOUNT
-            ]
-        })
-
-    const tx =
-        await ethereum.request({
-            method: "eth_sendTransaction",
-            params: [
-                {
-                    from: wallet,
-                    to: tokenContract,
-                    data: approveData
-                }
-            ]
-        })
-
-    await waitForTransaction(tx)
-
-    localStorage.setItem(
-        cacheKey,
-        "true"
-    )
-}
-
 function normalizeMiniPayError(
     error: unknown
 ) {
@@ -1129,13 +370,13 @@ function normalizeMiniPayError(
         lower.includes("transferfrom failed") ||
         lower.includes("payment from failed")
     ) {
-        return "Payment failed because MiniPay could not pull the USDT amount. Please make sure you have enough USDT balance and approval."
+        return "Payment failed because MiniPay could not pull the token amount. Please make sure you have enough balance and approval."
     }
 
     if (
-        lower.includes("no celo accepted")
+        lower.includes("rate limit")
     ) {
-        return "This payment route rejected the fallback CELO path. Retrying with the token payment route is required."
+        return "This wallet already used this payment recently. Please wait before paying again."
     }
 
     if (
@@ -1154,8 +395,310 @@ function normalizeMiniPayError(
     return rawMessage
 }
 
-async function sendPayment(
+async function waitForTransaction(
+    txHash: string
+) {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    let attempts = 0
+    const maxAttempts = 30
+
+    while (attempts < maxAttempts) {
+        const receipt =
+            await ethereum.request({
+                method:
+                    "eth_getTransactionReceipt",
+                params: [txHash]
+            })
+
+        if (receipt) {
+            return receipt
+        }
+
+        await new Promise((resolve) =>
+            setTimeout(resolve, 2000)
+        )
+
+        attempts++
+    }
+
+    throw new Error(
+        "Transaction timeout"
+    )
+}
+
+async function readUint256Call(
+    contractAddress: Address,
+    abi: readonly any[],
+    functionName: string,
+    args: any[] = []
+) {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    const result =
+        await ethereum.request({
+            method: "eth_call",
+            params: [
+                {
+                    to: contractAddress,
+                    data: encodeFunctionData({
+                        abi,
+                        functionName,
+                        args
+                    })
+                },
+                "latest"
+            ]
+        })
+
+    return BigInt(result as string)
+}
+
+async function readAddressCall(
+    contractAddress: Address,
+    functionName: "USDT" | "USDC"
+) {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    const result =
+        await ethereum.request({
+            method: "eth_call",
+            params: [
+                {
+                    to: contractAddress,
+                    data: encodeFunctionData({
+                        abi: PAYMENT_CONFIG_ABI,
+                        functionName,
+                        args: []
+                    })
+                },
+                "latest"
+            ]
+        })
+
+    return `0x${String(result).slice(-40)}` as Address
+}
+
+async function getTokenBalance(
+    wallet: Address,
+    tokenContract: Address
+) {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    const result =
+        await ethereum.request({
+            method: "eth_call",
+            params: [
+                {
+                    to: tokenContract,
+                    data: encodeFunctionData({
+                        abi: ERC20_ABI,
+                        functionName: "balanceOf",
+                        args: [wallet]
+                    })
+                },
+                "latest"
+            ]
+        })
+
+    return BigInt(result as string)
+}
+
+async function getLegacyTokenBalance(
+    wallet: Address,
+    token: PaymentToken,
+    currentTokenContract: Address
+) {
+    const legacyTokenContract =
+        token === "USDC"
+            ? FALLBACK_USDC_CONTRACT
+            : FALLBACK_USDT_CONTRACT
+
+    if (
+        legacyTokenContract.toLowerCase() ===
+        currentTokenContract.toLowerCase()
+    ) {
+        return BigInt(0)
+    }
+
+    try {
+        return await getTokenBalance(
+            wallet,
+            legacyTokenContract
+        )
+    } catch {
+        return BigInt(0)
+    }
+}
+
+async function hasEnoughAllowance(
+    wallet: Address,
+    spender: Address,
+    amount: bigint,
+    tokenContract: Address
+) {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    const result =
+        await ethereum.request({
+            method: "eth_call",
+            params: [
+                {
+                    to: tokenContract,
+                    data: encodeFunctionData({
+                        abi: ERC20_ABI,
+                        functionName: "allowance",
+                        args: [wallet, spender]
+                    })
+                },
+                "latest"
+            ]
+        })
+
+    return BigInt(result as string) >= amount
+}
+
+async function approveIfNeeded(
+    wallet: Address,
+    token: PaymentToken,
+    tokenContract: Address,
+    requiredPaymentAmount: bigint,
+    spenderContract: Address
+) {
+    const cacheKey =
+        getApprovalCacheKey(
+            wallet,
+            token,
+            tokenContract,
+            spenderContract
+        )
+
+    const approved =
+        localStorage.getItem(cacheKey)
+
+    if (approved === "true") {
+        const stillApproved =
+            await hasEnoughAllowance(
+                wallet,
+                spenderContract,
+                requiredPaymentAmount,
+                tokenContract
+            )
+
+        if (stillApproved) {
+            return
+        }
+
+        localStorage.removeItem(cacheKey)
+    }
+
+    const allowanceApproved =
+        await hasEnoughAllowance(
+            wallet,
+            spenderContract,
+            requiredPaymentAmount,
+            tokenContract
+        )
+
+    if (allowanceApproved) {
+        localStorage.setItem(
+            cacheKey,
+            "true"
+        )
+        return
+    }
+
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    const approveData =
+        encodeFunctionData({
+            abi: ERC20_ABI,
+            functionName: "approve",
+            args: [
+                spenderContract,
+                APPROVAL_AMOUNT
+            ]
+        })
+
+    const tx =
+        await ethereum.request({
+            method: "eth_sendTransaction",
+            params: [
+                {
+                    from: wallet,
+                    to: tokenContract,
+                    data: approveData
+                }
+            ]
+        })
+
+    await waitForTransaction(tx)
+
+    localStorage.setItem(
+        cacheKey,
+        "true"
+    )
+}
+
+async function getPaymentConfig(
+    kind: PurchaseKind,
     token: PaymentToken
+): Promise<PaymentConfig> {
+    const contractAddress =
+        getContractAddress(kind)
+
+    const tokenContract =
+        token === "USDC"
+            ? await readAddressCall(
+                contractAddress,
+                "USDC"
+            )
+            : await readAddressCall(
+                contractAddress,
+                "USDT"
+            )
+
+    const fee =
+        await readUint256Call(
+            contractAddress,
+            PAYMENT_CONFIG_ABI,
+            "FEE"
+        )
+
+    return {
+        contractAddress,
+        tokenContract,
+        fee
+    }
+}
+
+async function sendPayment(
+    token: PaymentToken,
+    kind: PurchaseKind
 ) {
     try {
         console.log(
@@ -1178,13 +721,15 @@ async function sendPayment(
 
         const paymentConfig =
             await getPaymentConfig(
-                token,
-                wallet
+                kind,
+                token
             )
 
         console.log(
             "[MiniPay] Payment config",
             {
+                contractAddress:
+                    paymentConfig.contractAddress,
                 tokenContract:
                     paymentConfig.tokenContract,
                 fee:
@@ -1196,7 +741,8 @@ async function sendPayment(
             wallet,
             token,
             paymentConfig.tokenContract,
-            paymentConfig.fee
+            paymentConfig.fee,
+            paymentConfig.contractAddress
         )
 
         console.log(
@@ -1216,7 +762,7 @@ async function sendPayment(
 
         if (
             tokenBalance <
-                paymentConfig.fee
+            paymentConfig.fee
         ) {
             const legacyTokenBalance =
                 await getLegacyTokenBalance(
@@ -1245,79 +791,32 @@ async function sendPayment(
             throw new Error("Wallet missing")
         }
 
-        let paymentData:
-            | `0x${string}`
-            | null = null
+        const functionName =
+            token === "USDC"
+                ? "payWithUSDC"
+                : "payWithUSDT"
 
-        let tx: string | null =
-            null
-        const methodCandidates =
-            getPaymentMethodCandidates(
-                token
-            )
+        console.log(
+            "[MiniPay] Opening payment popup",
+            functionName
+        )
 
-        for (
-            let index = 0;
-            index < methodCandidates.length;
-            index++
-        ) {
-            const methodName =
-                methodCandidates[index]
-
-            paymentData =
-                encodeFunctionData({
-                    abi: PAYMENT_ABI,
-                    functionName:
-                        methodName,
-                    args: []
-                })
-
-            console.log(
-                "[MiniPay] Opening payment popup",
-                methodName
-            )
-
-            try {
-                tx =
-                    await ethereum.request({
-                        method: "eth_sendTransaction",
-                        params: [
-                            {
-                                from: wallet,
-                                to: GAME_CONTRACT,
-                                data: paymentData,
-                                value: "0x0"
-                            }
-                        ]
-                    })
-
-                break
-            } catch (error) {
-                console.error(
-                    "[MiniPay] Payment method failed",
-                    methodName,
-                    error
-                )
-
-                const canFallback =
-                    methodName !== "pay" &&
-                    index <
-                        methodCandidates.length - 1 &&
-                    shouldFallbackToLegacyPay(
-                        error
-                    )
-
-                if (!canFallback) {
-                    throw error
-                }
-            }
-        }
-
-        if (!tx) {
-            throw new Error(
-                "MiniPay could not open the payment popup."
-            )
-        }
+        const tx =
+            await ethereum.request({
+                method: "eth_sendTransaction",
+                params: [
+                    {
+                        from: wallet,
+                        to: paymentConfig.contractAddress,
+                        data: encodeFunctionData({
+                            abi: PAYMENT_ABI,
+                            functionName,
+                            args: []
+                        }),
+                        value: "0x0"
+                    }
+                ]
+            })
 
         await waitForTransaction(tx)
 
@@ -1335,125 +834,52 @@ async function sendPayment(
 }
 
 export async function runMiniPayPayment(
-    token: PaymentToken = "USDT"
+    token: PaymentToken = "USDT",
+    kind: PurchaseKind = "entry"
 ) {
-    return await sendPayment(token)
+    return await sendPayment(
+        token,
+        kind
+    )
 }
 
-export async function completeGamePurchase(
-    walletAddress: string
-) {
-    const user =
-        await getOrCreateUserSnapshot(
-            walletAddress as Address
+export async function getEntryPaymentStatus(
+    wallet: Address
+): Promise<EntryPaymentStatus> {
+    const contractAddress =
+        getContractAddress("entry")
+
+    const payCount =
+        await readUint256Call(
+            contractAddress,
+            ENTRY_STATUS_ABI,
+            "getPayCount",
+            [wallet]
         )
 
-    const wallet =
-        normalizeWalletAddress(
-            walletAddress
+    const payCountUSDT =
+        await readUint256Call(
+            contractAddress,
+            ENTRY_STATUS_ABI,
+            "getPayCountUSDT",
+            [wallet]
         )
 
-    const snapshot = {
-        ...user,
-        hasPurchasedGame: true,
-        hints:
-            user.hasPurchasedGame
-                ? user.hints
-                : user.hints + FREE_UNLOCK_HINT_REWARD
-    }
-
-    await update(
-        ref(getDb(), `users/${wallet}`),
-        buildStoredUserRecord(snapshot)
-    )
-    await remove(
-        ref(
-            getDb(),
-            `users/${wallet}/universal`
+    const payCountUSDC =
+        await readUint256Call(
+            contractAddress,
+            ENTRY_STATUS_ABI,
+            "getPayCountUSDC",
+            [wallet]
         )
-    )
 
     return {
-        success: true,
-        snapshot
-    }
-}
-
-export async function completeHintPurchase(
-    walletAddress: string,
-    amount: number
-) {
-    const user =
-        await getOrCreateUserSnapshot(
-            walletAddress as Address
-        )
-
-    const wallet =
-        normalizeWalletAddress(
-            walletAddress
-        )
-
-    const hints =
-        user.hints + Math.max(0, amount)
-
-    const snapshot = {
-        ...user,
-        hints
-    }
-
-    await update(
-        ref(getDb(), `users/${wallet}`),
-        buildStoredUserRecord(snapshot)
-    )
-    await remove(
-        ref(
-            getDb(),
-            `users/${wallet}/universal`
-        )
-    )
-
-    return {
-        success: true,
-        snapshot
-    }
-}
-
-export async function completeRevivePurchase(
-    walletAddress: string,
-    amount: number
-) {
-    const user =
-        await getOrCreateUserSnapshot(
-            walletAddress as Address
-        )
-
-    const wallet =
-        normalizeWalletAddress(
-            walletAddress
-        )
-
-    const revives =
-        user.revives + Math.max(0, amount)
-
-    const snapshot = {
-        ...user,
-        revives,
-        lives: revives
-    }
-
-    await update(
-        ref(getDb(), `users/${wallet}`),
-        buildStoredUserRecord(snapshot)
-    )
-    await remove(
-        ref(
-            getDb(),
-            `users/${wallet}/universal`
-        )
-    )
-
-    return {
-        success: true,
-        snapshot
+        canPay:
+            payCount === BigInt(0) &&
+            payCountUSDT === BigInt(0) &&
+            payCountUSDC === BigInt(0),
+        payCount,
+        payCountUSDT,
+        payCountUSDC
     }
 }

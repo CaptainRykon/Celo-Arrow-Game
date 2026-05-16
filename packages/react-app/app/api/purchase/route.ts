@@ -13,13 +13,14 @@ export async function POST(
     const body =
       await request.json()
 
-      const action =
-          body.action
+    const action =
+      body.action
 
-      const walletAddress =
-          typeof body.walletAddress === "string"
-            ? body.walletAddress.trim()
-            : ""
+    const walletAddress =
+      typeof body.walletAddress === "string"
+        ? body.walletAddress.trim()
+        : ""
+
     if (!walletAddress) {
       return NextResponse.json(
         {
@@ -32,14 +33,9 @@ export async function POST(
       )
     }
 
-    // =========================
-    // PURCHASE GAME
-    // =========================
-    if (
-      action === "game"
-    ) {
+    if (action === "game") {
       const result =
-          await completeGamePurchase(walletAddress)
+        await completeGamePurchase(walletAddress)
 
       return NextResponse.json({
         success: true,
@@ -47,45 +43,30 @@ export async function POST(
       })
     }
 
-    // =========================
-    // PURCHASE HINTS
-    // =========================
-    if (
-      action === "hints"
-    ) {
+    if (action === "hints") {
       const amount =
-        Number(
-          body.amount || 10
+        Number(body.amount || 5)
+
+      const result =
+        await completeHintPurchase(
+          walletAddress,
+          amount
         )
 
-      const result =
-          await completeHintPurchase(
-              walletAddress,
-              amount
-          )
-
       return NextResponse.json({
         success: true,
         result
       })
     }
 
-    // =========================
-    // PURCHASE LIVES
-    // =========================
     if (
+      action === "revive" ||
       action === "lives"
     ) {
-      const amount =
-        Number(
-          body.amount || 3
-        )
-
       const result =
-          await completeRevivePurchase(
-              walletAddress,
-              amount
-          )
+        await completeRevivePurchase(
+          walletAddress
+        )
 
       return NextResponse.json({
         success: true,
@@ -96,8 +77,7 @@ export async function POST(
     return NextResponse.json(
       {
         success: false,
-        error:
-          "Unknown action"
+        error: "Unknown action"
       },
       {
         status: 400
