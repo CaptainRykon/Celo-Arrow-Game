@@ -4,7 +4,7 @@ import {
   completeGamePurchase,
   completeHintPurchase,
   completeRevivePurchase
-} from "@/lib/purchase"
+} from "@/lib/server-user-state"
 
 export async function POST(
   request: Request
