@@ -309,6 +309,14 @@ const ERC20_ABI = [
 
 const PAYMENT_ABI = [
     {
+        name: "pay",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [],
+        outputs: []
+    },
+
+    {
         name: "payWithUSDT",
         type: "function",
         stateMutability: "nonpayable",
@@ -324,6 +332,177 @@ const PAYMENT_ABI = [
         outputs: []
     }
 ]
+
+function flattenErrorParts(
+    error: unknown,
+    parts: string[],
+    visited = new Set<unknown>()
+) {
+    if (
+        error === null ||
+        error === undefined ||
+        visited.has(error)
+    ) {
+        return
+    }
+
+    if (
+        typeof error === "string" ||
+        typeof error === "number" ||
+        typeof error === "boolean"
+    ) {
+        const value =
+            String(error).trim()
+
+        if (
+            value &&
+            !parts.includes(value)
+        ) {
+            parts.push(value)
+        }
+
+        return
+    }
+
+    if (error instanceof Error) {
+        visited.add(error)
+        flattenErrorParts(
+            error.message,
+            parts,
+            visited
+        )
+
+        const extraError =
+            error as Error & {
+                cause?: unknown
+            }
+
+        if (
+            extraError.cause !== undefined
+        ) {
+            flattenErrorParts(
+                extraError.cause,
+                parts,
+                visited
+            )
+        }
+
+        return
+    }
+
+    if (typeof error === "object") {
+        visited.add(error)
+
+        const record =
+            error as Record<
+                string,
+                unknown
+            >
+
+        const prioritizedKeys = [
+            "message",
+            "shortMessage",
+            "reason",
+            "details",
+            "error",
+            "data",
+            "cause"
+        ]
+
+        for (const key of prioritizedKeys) {
+            if (
+                key in record &&
+                record[key] !== undefined
+            ) {
+                flattenErrorParts(
+                    record[key],
+                    parts,
+                    visited
+                )
+            }
+        }
+
+        if (
+            "code" in record &&
+            record.code !== undefined
+        ) {
+            const codeValue =
+                `code ${String(record.code).trim()}`
+
+            if (
+                codeValue &&
+                !parts.includes(codeValue)
+            ) {
+                parts.push(codeValue)
+            }
+        }
+
+        try {
+            const json =
+                JSON.stringify(error)
+
+            if (
+                json &&
+                json !== "{}" &&
+                !parts.includes(json)
+            ) {
+                parts.push(json)
+            }
+        } catch {
+        }
+    }
+}
+
+function extractErrorMessage(
+    error: unknown
+) {
+    const parts: string[] = []
+    flattenErrorParts(
+        error,
+        parts
+    )
+
+    return parts.length > 0
+        ? parts.join(" | ")
+        : "Payment failed"
+}
+
+function shouldFallbackToLegacyPay(
+    error: unknown
+) {
+    const lower =
+        extractErrorMessage(error)
+            .toLowerCase()
+
+    if (
+        lower.includes("cancel") ||
+        lower.includes("rejected") ||
+        lower.includes("denied") ||
+        lower.includes("insufficient")
+    ) {
+        return false
+    }
+
+    return (
+        lower.includes("execution reverted") ||
+        lower.includes("revert") ||
+        lower.includes("selector") ||
+        lower.includes("not recognized") ||
+        lower.includes("method") ||
+        lower.includes("unsupported") ||
+        lower.includes("invalid") ||
+        lower.includes("[object object]") ||
+        lower.includes("code -32603")
+    )
+}
+
+function getPaymentMethodCandidates(
+    token: PaymentToken
+) {
+    return token === "USDC"
+        ? ["payWithUSDC", "pay"] as const
+        : ["payWithUSDT", "pay"] as const
+}
 
 async function waitForTransaction(
     txHash: string
@@ -507,9 +686,7 @@ function normalizeMiniPayError(
     error: unknown
 ) {
     const rawMessage =
-        error instanceof Error
-            ? error.message
-            : String(error || "Payment failed")
+        extractErrorMessage(error)
 
     const lower =
         rawMessage.toLowerCase()
@@ -581,33 +758,78 @@ async function sendPayment(
             throw new Error("Wallet missing")
         }
 
-        const paymentData =
-            encodeFunctionData({
-                abi: PAYMENT_ABI,
+        let paymentData:
+            | `0x${string}`
+            | null = null
 
-                functionName:
-                    token === "USDC"
-                        ? "payWithUSDC"
-                        : "payWithUSDT",
+        let tx: string | null =
+            null
+        const methodCandidates =
+            getPaymentMethodCandidates(
+                token
+            )
 
-                args: []
-            })
+        for (
+            let index = 0;
+            index < methodCandidates.length;
+            index++
+        ) {
+            const methodName =
+                methodCandidates[index]
 
-        console.log(
-            "[MiniPay] Opening payment popup"
-        )
+            paymentData =
+                encodeFunctionData({
+                    abi: PAYMENT_ABI,
+                    functionName:
+                        methodName,
+                    args: []
+                })
 
-        const tx =
-            await ethereum.request({
-                method: "eth_sendTransaction",
-                params: [
-                    {
-                        from: wallet,
-                        to: GAME_CONTRACT,
-                        data: paymentData
-                    }
-                ]
-            })
+            console.log(
+                "[MiniPay] Opening payment popup",
+                methodName
+            )
+
+            try {
+                tx =
+                    await ethereum.request({
+                        method: "eth_sendTransaction",
+                        params: [
+                            {
+                                from: wallet,
+                                to: GAME_CONTRACT,
+                                data: paymentData
+                            }
+                        ]
+                    })
+
+                break
+            } catch (error) {
+                console.error(
+                    "[MiniPay] Payment method failed",
+                    methodName,
+                    error
+                )
+
+                const canFallback =
+                    methodName !== "pay" &&
+                    index <
+                        methodCandidates.length - 1 &&
+                    shouldFallbackToLegacyPay(
+                        error
+                    )
+
+                if (!canFallback) {
+                    throw error
+                }
+            }
+        }
+
+        if (!tx) {
+            throw new Error(
+                "MiniPay could not open the payment popup."
+            )
+        }
 
         await waitForTransaction(tx)
 
