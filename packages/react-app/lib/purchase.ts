@@ -39,8 +39,10 @@ const DEFAULT_UNIVERSAL: UniversalProgress = {
 }
 
 const FREE_UNLOCK_HINT_REWARD = 5
+const REQUIRED_PAYMENT_AMOUNT =
+    BigInt("500000")
 const APPROVAL_AMOUNT =
-    BigInt("999999999")
+    BigInt("1000000")
 
 function normalizeWalletAddress(
     walletAddress: string
@@ -601,6 +603,57 @@ async function hasEnoughAllowance(
     return BigInt(result as string) >= amount
 }
 
+async function getTokenBalance(
+    wallet: Address
+) {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    const balanceAbi = [
+        {
+            name: "balanceOf",
+            type: "function",
+            stateMutability: "view",
+            inputs: [
+                {
+                    name: "account",
+                    type: "address"
+                }
+            ],
+            outputs: [
+                {
+                    type: "uint256"
+                }
+            ]
+        }
+    ]
+
+    const data =
+        encodeFunctionData({
+            abi: balanceAbi,
+            functionName:
+                "balanceOf",
+            args: [wallet]
+        })
+
+    const result =
+        await ethereum.request({
+            method: "eth_call",
+            params: [
+                {
+                    to: USDT_CONTRACT,
+                    data
+                },
+                "latest"
+            ]
+        })
+
+    return BigInt(result as string)
+}
+
 async function approveIfNeeded(
     wallet: Address,
     token: PaymentToken
@@ -619,7 +672,7 @@ async function approveIfNeeded(
             await hasEnoughAllowance(
                 wallet,
                 GAME_CONTRACT as Address,
-                APPROVAL_AMOUNT
+                REQUIRED_PAYMENT_AMOUNT
             )
 
         if (stillApproved) {
@@ -635,7 +688,7 @@ async function approveIfNeeded(
         await hasEnoughAllowance(
             wallet,
             GAME_CONTRACT as Address,
-            APPROVAL_AMOUNT
+            REQUIRED_PAYMENT_AMOUNT
         )
 
     if (allowanceApproved) {
@@ -706,6 +759,19 @@ function normalizeMiniPayError(
     }
 
     if (
+        lower.includes("transferfrom failed") ||
+        lower.includes("payment from failed")
+    ) {
+        return "Payment failed because MiniPay could not pull the USDT amount. Please make sure you have enough USDT balance and approval."
+    }
+
+    if (
+        lower.includes("no celo accepted")
+    ) {
+        return "This payment route rejected the fallback CELO path. Retrying with the token payment route is required."
+    }
+
+    if (
         lower.includes("wallet not found") ||
         lower.includes("no wallet")
     ) {
@@ -751,6 +817,24 @@ async function sendPayment(
         console.log(
             "[MiniPay] Approval confirmed"
         )
+
+        const tokenBalance =
+            await getTokenBalance(wallet)
+
+        console.log(
+            "[MiniPay] USDT balance",
+            tokenBalance.toString()
+        )
+
+        if (
+            token === "USDT" &&
+            tokenBalance <
+                REQUIRED_PAYMENT_AMOUNT
+        ) {
+            throw new Error(
+                "Payment failed due to insufficient USDT balance."
+            )
+        }
 
         const ethereum = getEthereum()
 
@@ -798,7 +882,8 @@ async function sendPayment(
                             {
                                 from: wallet,
                                 to: GAME_CONTRACT,
-                                data: paymentData
+                                data: paymentData,
+                                value: "0x0"
                             }
                         ]
                     })
