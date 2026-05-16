@@ -27,11 +27,26 @@ import type {
 export type PaymentToken =
     | "USDT"
     | "USDC"
-const GAME_CONTRACT =
-    "0xd9a8665a4Bb8cde69Ba478F39924891D6e977eB7"
+const GAME_CONTRACT: Address =
+    (
+        process.env
+            .NEXT_PUBLIC_GAME_ENTRY_CONTRACT ||
+        "0xd9a8665a4Bb8cde69Ba478F39924891D6e977eB7"
+    ) as Address
 
-const USDT_CONTRACT: Address =
-    "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e"
+const FALLBACK_USDT_CONTRACT: Address =
+    (
+        process.env
+            .NEXT_PUBLIC_USDT_CONTRACT ||
+        "0x48065fbBE25f71C9282ddf5e1cD6D6A887483D5e"
+    ) as Address
+
+const FALLBACK_USDC_CONTRACT: Address =
+    (
+        process.env
+            .NEXT_PUBLIC_USDC_CONTRACT ||
+        "0x37f750B7cC259a2f741Af45294f6a16572CF5cAd"
+    ) as Address
 
 const DEFAULT_UNIVERSAL: UniversalProgress = {
     weeklyChallengeCycleIndex: 0,
@@ -39,8 +54,6 @@ const DEFAULT_UNIVERSAL: UniversalProgress = {
 }
 
 const FREE_UNLOCK_HINT_REWARD = 5
-const REQUIRED_PAYMENT_AMOUNT =
-    BigInt("500000")
 const APPROVAL_AMOUNT =
     BigInt("1000000")
 
@@ -52,9 +65,10 @@ function normalizeWalletAddress(
 
 function getApprovalCacheKey(
     wallet: Address,
-    token: PaymentToken
+    token: PaymentToken,
+    tokenContract: Address
 ) {
-    return `minipay_approved_${wallet.toLowerCase()}_${token.toLowerCase()}`
+    return `minipay_approved_${wallet.toLowerCase()}_${token.toLowerCase()}_${tokenContract.toLowerCase()}`
 }
 
 function buildDefaultUserSnapshot(
@@ -335,6 +349,63 @@ const PAYMENT_ABI = [
     }
 ]
 
+const PAYMENT_CONFIG_ABI = [
+    {
+        name: "USDT",
+        type: "function",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [
+            {
+                type: "address"
+            }
+        ]
+    },
+    {
+        name: "USDC",
+        type: "function",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [
+            {
+                type: "address"
+            }
+        ]
+    },
+    {
+        name: "FEE",
+        type: "function",
+        stateMutability: "view",
+        inputs: [],
+        outputs: [
+            {
+                type: "uint256"
+            }
+        ]
+    },
+    {
+        name: "canPay",
+        type: "function",
+        stateMutability: "view",
+        inputs: [
+            {
+                name: "user",
+                type: "address"
+            }
+        ],
+        outputs: [
+            {
+                type: "bool"
+            }
+        ]
+    }
+]
+
+type PaymentConfig = {
+    fee: bigint
+    tokenContract: Address
+}
+
 function flattenErrorParts(
     error: unknown,
     parts: string[],
@@ -506,6 +577,113 @@ function getPaymentMethodCandidates(
         : ["payWithUSDT", "pay"] as const
 }
 
+async function getPaymentConfig(
+    token: PaymentToken,
+    wallet: Address
+): Promise<PaymentConfig> {
+    const ethereum = getEthereum()
+
+    if (!ethereum) {
+        throw new Error("Wallet missing")
+    }
+
+    let tokenContract: Address =
+        token === "USDC"
+            ? FALLBACK_USDC_CONTRACT
+            : FALLBACK_USDT_CONTRACT
+
+    let fee = BigInt("500000")
+
+    try {
+        const contractToken =
+            await ethereum.request({
+                method: "eth_call",
+                params: [
+                    {
+                        to: GAME_CONTRACT,
+                        data: encodeFunctionData(
+                            {
+                                abi: PAYMENT_CONFIG_ABI,
+                                functionName:
+                                    token,
+                                args: []
+                            }
+                        )
+                    },
+                    "latest"
+                ]
+            })
+
+        if (
+            typeof contractToken ===
+            "string" &&
+            contractToken.length >= 42
+        ) {
+            tokenContract =
+                (`0x${contractToken.slice(-40)}` as Address)
+        }
+    } catch {
+    }
+
+    try {
+        const feeResult =
+            await ethereum.request({
+                method: "eth_call",
+                params: [
+                    {
+                        to: GAME_CONTRACT,
+                        data: encodeFunctionData(
+                            {
+                                abi: PAYMENT_CONFIG_ABI,
+                                functionName:
+                                    "FEE",
+                                args: []
+                            }
+                        )
+                    },
+                    "latest"
+                ]
+            })
+
+        if (typeof feeResult === "string") {
+            fee = BigInt(feeResult)
+        }
+    } catch {
+    }
+
+    try {
+        const canPayResult =
+            await ethereum.request({
+                method: "eth_call",
+                params: [
+                    {
+                        to: GAME_CONTRACT,
+                        data: encodeFunctionData(
+                            {
+                                abi: PAYMENT_CONFIG_ABI,
+                                functionName:
+                                    "canPay",
+                                args: [wallet]
+                            }
+                        )
+                    },
+                    "latest"
+                ]
+            })
+
+        console.log(
+            "[MiniPay] canPay",
+            canPayResult
+        )
+    } catch {
+    }
+
+    return {
+        fee,
+        tokenContract
+    }
+}
+
 async function waitForTransaction(
     txHash: string
 ) {
@@ -546,7 +724,8 @@ async function waitForTransaction(
 async function hasEnoughAllowance(
     wallet: Address,
     spender: Address,
-    amount: bigint
+    amount: bigint,
+    tokenContract: Address
 ) {
     const ethereum = getEthereum()
 
@@ -593,7 +772,7 @@ async function hasEnoughAllowance(
             method: "eth_call",
             params: [
                 {
-                    to: USDT_CONTRACT,
+                    to: tokenContract,
                     data
                 },
                 "latest"
@@ -604,7 +783,8 @@ async function hasEnoughAllowance(
 }
 
 async function getTokenBalance(
-    wallet: Address
+    wallet: Address,
+    tokenContract: Address
 ) {
     const ethereum = getEthereum()
 
@@ -644,7 +824,7 @@ async function getTokenBalance(
             method: "eth_call",
             params: [
                 {
-                    to: USDT_CONTRACT,
+                    to: tokenContract,
                     data
                 },
                 "latest"
@@ -656,12 +836,15 @@ async function getTokenBalance(
 
 async function approveIfNeeded(
     wallet: Address,
-    token: PaymentToken
+    token: PaymentToken,
+    tokenContract: Address,
+    requiredPaymentAmount: bigint
 ) {
     const cacheKey =
         getApprovalCacheKey(
             wallet,
-            token
+            token,
+            tokenContract
         )
 
     const approved =
@@ -672,7 +855,8 @@ async function approveIfNeeded(
             await hasEnoughAllowance(
                 wallet,
                 GAME_CONTRACT as Address,
-                REQUIRED_PAYMENT_AMOUNT
+                requiredPaymentAmount,
+                tokenContract
             )
 
         if (stillApproved) {
@@ -688,7 +872,8 @@ async function approveIfNeeded(
         await hasEnoughAllowance(
             wallet,
             GAME_CONTRACT as Address,
-            REQUIRED_PAYMENT_AMOUNT
+            requiredPaymentAmount,
+            tokenContract
         )
 
     if (allowanceApproved) {
@@ -721,7 +906,7 @@ async function approveIfNeeded(
             params: [
                 {
                     from: wallet,
-                    to: USDT_CONTRACT,
+                    to: tokenContract,
                     data: approveData
                 }
             ]
@@ -809,9 +994,27 @@ async function sendPayment(
             "[MiniPay] Network confirmed"
         )
 
+        const paymentConfig =
+            await getPaymentConfig(
+                token,
+                wallet
+            )
+
+        console.log(
+            "[MiniPay] Payment config",
+            {
+                tokenContract:
+                    paymentConfig.tokenContract,
+                fee:
+                    paymentConfig.fee.toString()
+            }
+        )
+
         await approveIfNeeded(
             wallet,
-            token
+            token,
+            paymentConfig.tokenContract,
+            paymentConfig.fee
         )
 
         console.log(
@@ -819,20 +1022,22 @@ async function sendPayment(
         )
 
         const tokenBalance =
-            await getTokenBalance(wallet)
+            await getTokenBalance(
+                wallet,
+                paymentConfig.tokenContract
+            )
 
         console.log(
-            "[MiniPay] USDT balance",
+            `[MiniPay] ${token} balance`,
             tokenBalance.toString()
         )
 
         if (
-            token === "USDT" &&
             tokenBalance <
-                REQUIRED_PAYMENT_AMOUNT
+                paymentConfig.fee
         ) {
             throw new Error(
-                "Payment failed due to insufficient USDT balance."
+                `Payment failed due to insufficient ${token} balance.`
             )
         }
 
