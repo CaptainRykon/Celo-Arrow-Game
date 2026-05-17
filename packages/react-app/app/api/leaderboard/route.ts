@@ -5,6 +5,23 @@ import {
     getChallengeLeaderboard
 } from "@/lib/Leaderboard"
 
+const MAX_LEADERBOARD_ENTRIES = 25
+
+function clampLimit(
+    value: unknown
+) {
+    const numericValue = Number(
+        value
+    )
+
+    if (!Number.isFinite(numericValue))
+        return MAX_LEADERBOARD_ENTRIES
+
+    return Math.min(
+        MAX_LEADERBOARD_ENTRIES,
+        Math.max(1, Math.floor(numericValue))
+    )
+}
 
 export async function POST(
     request: Request
@@ -16,30 +33,21 @@ export async function POST(
         const action =
             body.action
 
-        // =========================
-        // SUBMIT SCORE
-        // =========================
         if (action === "submit") {
             const walletAddress =
                 body.walletAddress
-
             const playerName =
                 body.playerName ||
                 "Guest"
-
-            const cycleIndex =
-                Number(
-                    body.cycleIndex || 0
-                )
-
+            const cycleIndex = Number(
+                body.cycleIndex || 0
+            )
             const patternName =
                 body.patternName ||
                 "Unknown"
-
-            const completionSeconds =
-                Number(
-                    body.completionSeconds || 0
-                )
+            const completionSeconds = Number(
+                body.completionSeconds || 0
+            )
 
             if (!walletAddress) {
                 return NextResponse.json(
@@ -69,24 +77,16 @@ export async function POST(
             })
         }
 
-        // =========================
-        // GET LEADERBOARD
-        // =========================
         if (action === "get") {
-            const cycleIndex =
-                Number(
-                    body.cycleIndex || 0
-                )
-
+            const cycleIndex = Number(
+                body.cycleIndex || 0
+            )
             const patternName =
                 body.patternName ||
                 "Unknown"
-
-            const limit =
-                Number(
-                    body.limit || 10
-                )
-
+            const limit = clampLimit(
+                body.limit
+            )
             const playerWallet =
                 body.walletAddress
 
@@ -102,7 +102,6 @@ export async function POST(
                 success: true,
                 entries:
                     leaderboard.entries,
-
                 playerRank:
                     leaderboard.playerRank
             })
