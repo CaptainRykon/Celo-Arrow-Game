@@ -420,11 +420,16 @@ export default function GameClient() {
         payload: any
     ) {
         try {
+            const reviveKind =
+                payload?.mode === "challenge"
+                    ? "reviveChallenge"
+                    : "reviveClassic"
+
             const wallet =
                 await runMiniPayPayment(
                     payload?.token ||
                     "USDT",
-                    "revive"
+                    reviveKind
                 )
 
             const response =
@@ -561,3 +566,4 @@ export default function GameClient() {
         </div>
     )
 }
+

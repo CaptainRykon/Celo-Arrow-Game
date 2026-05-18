@@ -18,6 +18,8 @@ export type PurchaseKind =
     | "entry"
     | "hint"
     | "revive"
+    | "reviveClassic"
+    | "reviveChallenge"
 
 export interface EntryPaymentStatus {
     canPay: boolean
@@ -42,6 +44,20 @@ const CONTRACTS: Record<PurchaseKind, Address> = {
         process.env
             .NEXT_PUBLIC_HINT_PURCHASE_CONTRACT ||
         "0x69c9faF5C9b3A9227c2e1E5312a261103b99933F"
+    ) as Address,
+    reviveClassic: (
+        process.env
+            .NEXT_PUBLIC_CLASSIC_REVIVE_PURCHASE_CONTRACT ||
+        process.env
+            .NEXT_PUBLIC_REVIVE_PURCHASE_CONTRACT ||
+        "0x2dEf5F5EFC3d44822DDA3dD24D1DEAdEC311Bd8a"
+    ) as Address,
+    reviveChallenge: (
+        process.env
+            .NEXT_PUBLIC_CHALLENGE_REVIVE_PURCHASE_CONTRACT ||
+        process.env
+            .NEXT_PUBLIC_REVIVE_PURCHASE_CONTRACT ||
+        "0x2dEf5F5EFC3d44822DDA3dD24D1DEAdEC311Bd8a"
     ) as Address,
     revive: (
         process.env
@@ -833,14 +849,68 @@ async function sendPayment(
     }
 }
 
+function getFallbackTokenOrder(
+    preferredToken: PaymentToken
+) {
+    return preferredToken === "USDC"
+        ? (["USDC", "USDT"] as const)
+        : (["USDT", "USDC"] as const)
+}
+
 export async function runMiniPayPayment(
     token: PaymentToken = "USDT",
     kind: PurchaseKind = "entry"
 ) {
-    return await sendPayment(
-        token,
-        kind
-    )
+    const tokenOrder =
+        getFallbackTokenOrder(token)
+
+    let firstError: Error | null = null
+
+    for (let index = 0; index < tokenOrder.length; index++) {
+        const currentToken =
+            tokenOrder[index]
+
+        try {
+            return await sendPayment(
+                currentToken,
+                kind
+            )
+        } catch (error) {
+            const normalizedError =
+                error instanceof Error
+                    ? error
+                    : new Error(
+                        normalizeMiniPayError(error)
+                    )
+
+            if (firstError === null)
+                firstError = normalizedError
+
+            const lowerMessage =
+                normalizedError.message.toLowerCase()
+
+            const shouldTryNextToken =
+                index < tokenOrder.length - 1 &&
+                (
+                    lowerMessage.includes("insufficient") ||
+                    lowerMessage.includes("different token contract") ||
+                    lowerMessage.includes("transferfrom failed") ||
+                    lowerMessage.includes("payment from failed")
+                )
+
+            if (shouldTryNextToken) {
+                console.log(
+                    "[MiniPay] Retrying payment with fallback token",
+                    tokenOrder[index + 1]
+                )
+                continue
+            }
+
+            throw normalizedError
+        }
+    }
+
+    throw firstError ?? new Error("Payment failed")
 }
 
 export async function getEntryPaymentStatus(
@@ -883,3 +953,5 @@ export async function getEntryPaymentStatus(
         payCountUSDC
     }
 }
+
+
